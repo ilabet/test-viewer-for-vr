@@ -92,6 +92,7 @@ pub struct XrInput {
 }
 
 /// A frame the renderer must draw: two eyes into `targets[image]` layers 0/1.
+#[derive(Clone)]
 pub struct XrFrame {
     pub display_time: xr::Time,
     pub eyes: [EyeView; 2],
@@ -129,18 +130,26 @@ pub struct XrSession {
     blend: xr::EnvironmentBlendMode,
 }
 
-fn pick_format(formats: &[u32]) -> Option<(u32, wgpu::TextureFormat)> {
-    [
+/// The swapchain format: `prefer` (the window's, so that eyes drawn for it
+/// copy straight in) or its sRGB / linear sibling.
+fn pick_format(formats: &[u32], prefer: wgpu::TextureFormat) -> Option<(u32, wgpu::TextureFormat)> {
+    let table = [
         (vk::Format::R8G8B8A8_SRGB, wgpu::TextureFormat::Rgba8UnormSrgb),
         (vk::Format::B8G8R8A8_SRGB, wgpu::TextureFormat::Bgra8UnormSrgb),
-    ]
-    .into_iter()
-    .find(|(vkf, _)| formats.contains(&(vkf.as_raw() as u32)))
-    .map(|(vkf, f)| (vkf.as_raw() as u32, f))
+        (vk::Format::R8G8B8A8_UNORM, wgpu::TextureFormat::Rgba8Unorm),
+        (vk::Format::B8G8R8A8_UNORM, wgpu::TextureFormat::Bgra8Unorm),
+    ];
+    let wanted = [prefer, prefer.add_srgb_suffix(), prefer.remove_srgb_suffix()];
+    wanted
+        .iter()
+        .find_map(|w| table.iter().find(|(vkf, f)| f == w && formats.contains(&(vkf.as_raw() as u32))))
+        .map(|&(vkf, f)| (vkf.as_raw() as u32, f))
 }
 
 impl XrSession {
-    pub fn new(rt_: &XrRuntime, gpu: &XrGpu) -> Result<Self, XrError> {
+    /// `size` and `format`: the eye images', those of the frames drawn for
+    /// them (the runtime scales them to the display).
+    pub fn new(rt_: &XrRuntime, gpu: &XrGpu, size: (u32, u32), format: wgpu::TextureFormat) -> Result<Self, XrError> {
         let inst = &rt_.instance;
         // SAFETY: the handles come from XrRuntime::create_gpu on this system.
         let (session, frame_wait, frame_stream) = unsafe {
@@ -160,8 +169,9 @@ impl XrSession {
             .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
             .or_else(|_| session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY))
             .map_err(rt)?;
-        let (vk_format, format) = pick_format(&session.enumerate_swapchain_formats().map_err(rt)?).ok_or_else(|| rt("no sRGB swapchain format"))?;
-        let eye_size = rt_.info.eye_size;
+        let (vk_format, format) = pick_format(&session.enumerate_swapchain_formats().map_err(rt)?, format)
+            .ok_or_else(|| rt(format!("no swapchain format compatible with {format:?}")))?;
+        let eye_size = size;
         let swapchain = session
             .create_swapchain(&xr::SwapchainCreateInfo {
                 create_flags: xr::SwapchainCreateFlags::EMPTY,
@@ -411,6 +421,15 @@ mod tests {
         let a = e.projection(0.1);
         let b = glam::camera::rh::proj::directx::perspective_infinite_reverse(2.0 * half, 1.0, 0.1);
         assert!(a.abs_diff_eq(b, 1e-4), "{a:?} vs {b:?}");
+    }
+
+    #[test]
+    fn swapchain_format_follows_the_window() {
+        let srgb = vk::Format::B8G8R8A8_SRGB.as_raw() as u32;
+        let rgba = vk::Format::R8G8B8A8_UNORM.as_raw() as u32;
+        assert_eq!(pick_format(&[rgba, srgb], wgpu::TextureFormat::Bgra8UnormSrgb).map(|f| f.1), Some(wgpu::TextureFormat::Bgra8UnormSrgb));
+        assert_eq!(pick_format(&[srgb], wgpu::TextureFormat::Bgra8Unorm).map(|f| f.1), Some(wgpu::TextureFormat::Bgra8UnormSrgb));
+        assert_eq!(pick_format(&[rgba], wgpu::TextureFormat::Bgra8Unorm), None);
     }
 
     #[test]

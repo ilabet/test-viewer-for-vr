@@ -4469,6 +4469,11 @@ impl Backend {
     }
 
     /// Supported MSAA sample counts (besides 1).
+    /// Format of the window's images (VR eyes are drawn in it too).
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
     pub fn msaa_supported(&self) -> &[u32] {
         &self.msaa_supported
     }
@@ -4980,6 +4985,7 @@ impl Backend {
             capture: wanted,
             histogram,
             input_at,
+            xr_eye,
         } = packet;
         let mut stats = RenderStats::default();
         if let Some(t) = &mut self.timer {
@@ -5077,10 +5083,10 @@ impl Backend {
             );
         }
         let t_acquire = Instant::now();
-        let surface_tex = if snapshot.is_some() {
-            // a photo is drawn offscreen at its size, never presented
+        let surface_tex = if snapshot.is_some() || xr_eye.is_some() {
+            // a photo (or a VR eye) is drawn offscreen at its size, never presented
             Some(FrameTarget::Offscreen(self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("snapshot"),
+                label: Some(if xr_eye.is_some() { "xr eye" } else { "snapshot" }),
                 size: wgpu::Extent3d {
                     width: self.config.width,
                     height: self.config.height,
@@ -7730,6 +7736,23 @@ impl Backend {
         }
 
         prof.mark("egui");
+        if let Some(eye) = &xr_eye {
+            let size = eye.texture.size();
+            encoder.copy_texture_to_texture(
+                surface_tex.texture().as_image_copy(),
+                wgpu::TexelCopyTextureInfo {
+                    texture: &eye.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: eye.layer },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: size.width.min(self.config.width),
+                    height: size.height.min(self.config.height),
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         if wanted == Some(Capture::Full) {
             capture = self.encode_capture(&mut encoder, surface_tex.texture(), false);
         } else if snapshot.is_some() {

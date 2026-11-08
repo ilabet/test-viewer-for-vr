@@ -126,6 +126,15 @@ pub(crate) struct FramePacket {
     /// When the frame began reading its input (`Renderer::mark_input`):
     /// the time to its presentation is the latency the frame pacing cuts.
     pub input_at: Option<Instant>,
+    /// Draw this frame for one eye of a VR headset: offscreen, then copied
+    /// into that layer of the headset's image instead of being presented.
+    pub xr_eye: Option<XrEyeTarget>,
+}
+
+/// One eye's layer of an OpenXR swapchain image.
+pub struct XrEyeTarget {
+    pub texture: wgpu::Texture,
+    pub layer: u32,
 }
 
 pub(crate) struct FrameResult {

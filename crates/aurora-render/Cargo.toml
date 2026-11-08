@@ -26,6 +26,8 @@ intel_tex_2 = "0.5.0"
 # their own (dedicated.rs); macOS draws through Metal instead
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 ash = "0.38"
+# OpenXR headsets (AURORA_VR=1), behind the `openxr` feature
+aurora-xr = { version = "0.1.0", path = "../aurora-xr", optional = true }
 
 # Metal under wgpu: memory budget and size of the device (vram.rs); the
 # version and the feature wgpu-hal uses
@@ -35,6 +37,9 @@ objc2-metal = { version = "0.3.2", default-features = false, features = ["std", 
 [target.'cfg(windows)'.dependencies]
 # CPU time of a thread, for the profile (thread_cpu.rs)
 windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_System_WindowsProgramming"] }
+
+[features]
+openxr = ["dep:aurora-xr"]
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
