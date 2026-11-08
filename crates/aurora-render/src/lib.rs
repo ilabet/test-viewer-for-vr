@@ -80,11 +80,13 @@ pub use histogram::HISTOGRAM_BINS;
 pub use hud::HudView;
 pub use label_depth::{world_label_at, world_line_at};
 pub use main_thread::{GpuInfo, Renderer};
-#[cfg(all(feature = "openxr", not(target_os = "macos")))]
-pub use aurora_xr;
 pub use renderer::{CASCADES, RenderError};
 pub use textures::{MASK_CUTOFF, MipLevel, alpha_coverage, build_mips, build_mips_alpha_weighted, preserve_alpha_coverage};
 pub use types::*;
+
+// VR headsets (the `openxr` feature)
+#[cfg(all(feature = "openxr", not(target_os = "macos")))]
+pub use aurora_xr;
 pub use ui_blur::blurred_backdrop;
 pub use ui_frame::{EguiFrame, EguiHandOver};
 pub use ui_glass::{glass_panel, glass_panel_faded, glass_region};

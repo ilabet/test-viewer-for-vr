@@ -851,6 +851,12 @@ The inventory's right-click menu offers "Move to…" for a folder, an item or a
 multiple selection. Type a name in the window's filter, choose the
 destination folder then confirm with Move.
 
+### VR headsets
+
+Experimental: PC VR headsets through OpenXR (SteamVR, Meta Quest Link, Virtual
+Desktop…). Build with `--features openxr` and start with `AURORA_VR=1`;
+without a headset Aurora stays on the desktop. See [docs/VR.md](docs/VR.md).
+
 ### Reporting a bug during the alpha
 
 The bug icon in the top bar, the Help menu, the login screen and the "Send a

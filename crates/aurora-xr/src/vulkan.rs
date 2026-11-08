@@ -53,26 +53,44 @@ impl XrRuntime {
         let extensions = HalInstance::desired_extensions(&entry, api_version, flags).map_err(rt)?;
         let ext_ptrs: Vec<*const c_char> = extensions.iter().map(|e| e.as_ptr()).collect();
         let app = vk::ApplicationInfo::default().api_version(api_version);
-        let create_info = vk::InstanceCreateInfo::default().application_info(&app).enabled_extension_names(&ext_ptrs);
+        let create_info = vk::InstanceCreateInfo::default()
+            .application_info(&app)
+            .enabled_extension_names(&ext_ptrs);
         // SAFETY: the function pointer comes from the loaded Vulkan entry and
         // matches vkGetInstanceProcAddr; create_info outlives the call.
         let gipa: xr::sys::platform::VkGetInstanceProcAddr = unsafe { std::mem::transmute(entry.static_fn().get_instance_proc_addr) };
-        let raw_instance = unsafe { self.instance.create_vulkan_instance(self.system, gipa, &create_info as *const _ as *const _) }
-            .map_err(rt)?
-            .map_err(|r| XrError::Runtime(format!("vkCreateInstance: {r}")))?;
+        let raw_instance = unsafe {
+            self.instance
+                .create_vulkan_instance(self.system, gipa, &create_info as *const _ as *const _)
+        }
+        .map_err(rt)?
+        .map_err(|r| XrError::Runtime(format!("vkCreateInstance: {r}")))?;
         let vk_instance = vk::Instance::from_raw(raw_instance as u64);
         // SAFETY: the instance was just created with this entry.
         let ash_instance = unsafe { ash::Instance::load(entry.static_fn(), vk_instance) };
         // SAFETY: wgpu-hal takes ownership of a valid instance created with
         // exactly these extensions.
         let hal_instance = unsafe {
-            HalInstance::from_raw(entry.clone(), ash_instance.clone(), api_version, 0, None, extensions, flags, Default::default(), false, None)
+            HalInstance::from_raw(
+                entry.clone(),
+                ash_instance.clone(),
+                api_version,
+                0,
+                None,
+                extensions,
+                flags,
+                Default::default(),
+                false,
+                None,
+            )
         }
         .map_err(rt)?;
         // SAFETY: asks the runtime which physical device drives the headset.
         let raw_phd = unsafe { self.instance.vulkan_graphics_device(self.system, raw_instance) }.map_err(rt)?;
         let vk_physical_device = vk::PhysicalDevice::from_raw(raw_phd as u64);
-        let exposed = hal_instance.expose_adapter(vk_physical_device).ok_or_else(|| rt("the headset's GPU is not usable by wgpu"))?;
+        let exposed = hal_instance
+            .expose_adapter(vk_physical_device)
+            .ok_or_else(|| rt("the headset's GPU is not usable by wgpu"))?;
         // SAFETY: plain property query on a valid physical device.
         let families = unsafe { ash_instance.get_physical_device_queue_family_properties(vk_physical_device) };
         let queue_family = families
@@ -82,7 +100,15 @@ impl XrRuntime {
         // SAFETY: the hal objects are valid and handed over exactly once.
         let instance = unsafe { wgpu::Instance::from_hal::<Vulkan>(hal_instance) };
         let adapter = unsafe { instance.create_adapter_from_hal::<Vulkan>(exposed) };
-        Ok(XrAdapter { instance, adapter, vk_instance, vk_physical_device, queue_family, ash_instance, gipa })
+        Ok(XrAdapter {
+            instance,
+            adapter,
+            vk_instance,
+            vk_physical_device,
+            queue_family,
+            ash_instance,
+            gipa,
+        })
     }
 
     /// Creates the wgpu device through the OpenXR runtime in one step.
@@ -102,12 +128,21 @@ impl XrAdapter {
             let dev_ext_ptrs: Vec<*const c_char> = dev_exts.iter().map(|e| e.as_ptr()).collect();
             let mut phd_features = hal_adapter.physical_device_features(&dev_exts, features);
             let priorities = [1.0f32];
-            let queues = [vk::DeviceQueueCreateInfo::default().queue_family_index(self.queue_family).queue_priorities(&priorities)];
-            let info = vk::DeviceCreateInfo::default().queue_create_infos(&queues).enabled_extension_names(&dev_ext_ptrs);
+            let queues = [vk::DeviceQueueCreateInfo::default()
+                .queue_family_index(self.queue_family)
+                .queue_priorities(&priorities)];
+            let info = vk::DeviceCreateInfo::default()
+                .queue_create_infos(&queues)
+                .enabled_extension_names(&dev_ext_ptrs);
             let info = phd_features.add_to_device_create(info);
             // SAFETY: the create info and its chains outlive the call.
             let raw_device = unsafe {
-                rt_.instance.create_vulkan_device(rt_.system, self.gipa, self.vk_physical_device.as_raw() as _, &info as *const _ as *const _)
+                rt_.instance.create_vulkan_device(
+                    rt_.system,
+                    self.gipa,
+                    self.vk_physical_device.as_raw() as _,
+                    &info as *const _ as *const _,
+                )
             }
             .map_err(rt)?
             .map_err(|r| XrError::Runtime(format!("vkCreateDevice: {r}")))?;
@@ -117,7 +152,16 @@ impl XrAdapter {
             // SAFETY: wgpu-hal takes ownership of the device, created with
             // these extensions and features on queue family `queue_family`.
             let open = unsafe {
-                hal_adapter.device_from_raw(ash_device, None, &dev_exts, features, limits, &wgpu::MemoryHints::Performance, self.queue_family, 0)
+                hal_adapter.device_from_raw(
+                    ash_device,
+                    None,
+                    &dev_exts,
+                    features,
+                    limits,
+                    &wgpu::MemoryHints::Performance,
+                    self.queue_family,
+                    0,
+                )
             }
             .map_err(rt)?;
             (open, vk_device)

@@ -49,12 +49,10 @@ impl XrRuntime {
             )
             .map_err(|e| XrError::Runtime(e.to_string()))?;
         let props = instance.properties().map_err(|e| XrError::Runtime(e.to_string()))?;
-        let system = instance
-            .system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)
-            .map_err(|e| match e {
-                xr::sys::Result::ERROR_FORM_FACTOR_UNAVAILABLE => XrError::NoHeadset,
-                e => XrError::Runtime(e.to_string()),
-            })?;
+        let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY).map_err(|e| match e {
+            xr::sys::Result::ERROR_FORM_FACTOR_UNAVAILABLE => XrError::NoHeadset,
+            e => XrError::Runtime(e.to_string()),
+        })?;
         let sys_props = instance.system_properties(system).map_err(|e| XrError::Runtime(e.to_string()))?;
         let views = instance
             .enumerate_view_configuration_views(system, xr::ViewConfigurationType::PRIMARY_STEREO)

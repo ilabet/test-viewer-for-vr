@@ -453,7 +453,10 @@ impl Renderer {
         let msaa_supported = backend.msaa_supported().to_vec();
         let can_capture = backend.can_capture();
         // a VR frame is handed to the headset once its eyes are submitted: drawn here
-        let host = Host::new(backend, xr.is_none() && thread_wanted(std::env::var("AURORA_RENDER_THREAD").ok().as_deref()));
+        let host = Host::new(
+            backend,
+            xr.is_none() && thread_wanted(std::env::var("AURORA_RENDER_THREAD").ok().as_deref()),
+        );
         log::info!(
             "renderer: {}",
             if host.threaded() {

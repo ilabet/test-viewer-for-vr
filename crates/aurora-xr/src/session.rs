@@ -185,7 +185,11 @@ impl XrSession {
                 mip_count: 1,
             })
             .map_err(rt)?;
-        let size = wgpu::Extent3d { width: eye_size.0, height: eye_size.1, depth_or_array_layers: 2 };
+        let size = wgpu::Extent3d {
+            width: eye_size.0,
+            height: eye_size.1,
+            depth_or_array_layers: 2,
+        };
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST;
         let mut targets = Vec::new();
         for image in swapchain.enumerate_images().map_err(rt)? {
@@ -234,7 +238,20 @@ impl XrSession {
             .first()
             .copied()
             .unwrap_or(xr::EnvironmentBlendMode::OPAQUE);
-        Ok(Self { session, frame_wait, frame_stream, stage, swapchain, targets, format, eye_size, actions, running: false, pending: None, blend })
+        Ok(Self {
+            session,
+            frame_wait,
+            frame_stream,
+            stage,
+            swapchain,
+            targets,
+            format,
+            eye_size,
+            actions,
+            running: false,
+            pending: None,
+            blend,
+        })
     }
 
     /// Handles runtime events; returns false once the session must close.
@@ -284,7 +301,12 @@ impl XrSession {
         let image = self.swapchain.acquire_image().map_err(rt)? as usize;
         self.swapchain.wait_image(xr::Duration::INFINITE).map_err(rt)?;
         self.pending = Some((t, views));
-        Ok(Some(XrFrame { display_time: t, eyes: views.map(eye), image, input }))
+        Ok(Some(XrFrame {
+            display_time: t,
+            eyes: views.map(eye),
+            image,
+            input,
+        }))
     }
 
     /// Hands the drawn eyes to the compositor. Call after the queue
@@ -294,13 +316,21 @@ impl XrSession {
         self.swapchain.release_image().map_err(rt)?;
         let rect = xr::Rect2Di {
             offset: xr::Offset2Di { x: 0, y: 0 },
-            extent: xr::Extent2Di { width: self.eye_size.0 as i32, height: self.eye_size.1 as i32 },
+            extent: xr::Extent2Di {
+                width: self.eye_size.0 as i32,
+                height: self.eye_size.1 as i32,
+            },
         };
         let proj = |i: usize| {
             xr::CompositionLayerProjectionView::new()
                 .pose(views[i].pose)
                 .fov(views[i].fov)
-                .sub_image(xr::SwapchainSubImage::new().swapchain(&self.swapchain).image_array_index(i as u32).image_rect(rect))
+                .sub_image(
+                    xr::SwapchainSubImage::new()
+                        .swapchain(&self.swapchain)
+                        .image_array_index(i as u32)
+                        .image_rect(rect),
+                )
         };
         let layer_views = [proj(0), proj(1)];
         let layer = xr::CompositionLayerProjection::new().space(&self.stage).views(&layer_views);
@@ -332,9 +362,33 @@ impl Actions {
         let aim = set.create_action::<xr::Posef>("aim", "Aim", &hands).map_err(rt)?;
         // Touch-style controllers (Quest, Index, Pico, WMR all map to these).
         let touch = [
-            ("/interaction_profiles/oculus/touch_controller", "a/click", "x/click", "b/click", "y/click", "trigger/value", "squeeze/value"),
-            ("/interaction_profiles/valve/index_controller", "a/click", "a/click", "b/click", "b/click", "trigger/click", "squeeze/value"),
-            ("/interaction_profiles/bytedance/pico4_controller", "a/click", "x/click", "b/click", "y/click", "trigger/value", "squeeze/value"),
+            (
+                "/interaction_profiles/oculus/touch_controller",
+                "a/click",
+                "x/click",
+                "b/click",
+                "y/click",
+                "trigger/value",
+                "squeeze/value",
+            ),
+            (
+                "/interaction_profiles/valve/index_controller",
+                "a/click",
+                "a/click",
+                "b/click",
+                "b/click",
+                "trigger/click",
+                "squeeze/value",
+            ),
+            (
+                "/interaction_profiles/bytedance/pico4_controller",
+                "a/click",
+                "x/click",
+                "b/click",
+                "y/click",
+                "trigger/value",
+                "squeeze/value",
+            ),
         ];
         for (profile, a, x, b, y, trig, squeeze) in touch {
             let Ok(profile) = path(profile) else { continue };
@@ -379,12 +433,28 @@ impl Actions {
             aim.create_space(session, hands[0], xr::Posef::IDENTITY).map_err(rt)?,
             aim.create_space(session, hands[1], xr::Posef::IDENTITY).map_err(rt)?,
         ];
-        Ok(Self { set, move_stick, turn_stick, jump, descend, menu, trigger, grip, aim, hands, aim_spaces })
+        Ok(Self {
+            set,
+            move_stick,
+            turn_stick,
+            jump,
+            descend,
+            menu,
+            trigger,
+            grip,
+            aim,
+            hands,
+            aim_spaces,
+        })
     }
 
     fn read(&self, session: &xr::Session<xr::Vulkan>, stage: &xr::Space, t: xr::Time) -> Result<XrInput, XrError> {
         session.sync_actions(&[(&self.set).into()]).map_err(rt)?;
-        let v2 = |a: &xr::Action<xr::Vector2f>| a.state(session, xr::Path::NULL).map(|s| Vec2::new(s.current_state.x, s.current_state.y)).unwrap_or_default();
+        let v2 = |a: &xr::Action<xr::Vector2f>| {
+            a.state(session, xr::Path::NULL)
+                .map(|s| Vec2::new(s.current_state.x, s.current_state.y))
+                .unwrap_or_default()
+        };
         let b = |a: &xr::Action<bool>, p: xr::Path| a.state(session, p).map(|s| s.current_state).unwrap_or(false);
         let mut input = XrInput {
             move_stick: v2(&self.move_stick),
@@ -398,7 +468,9 @@ impl Actions {
             input.trigger[i] = b(&self.trigger, self.hands[i]);
             input.grip[i] = b(&self.grip, self.hands[i]);
             if let Ok(loc) = self.aim_spaces[i].locate(stage, t)
-                && loc.location_flags.contains(xr::SpaceLocationFlags::POSITION_VALID | xr::SpaceLocationFlags::ORIENTATION_VALID)
+                && loc
+                    .location_flags
+                    .contains(xr::SpaceLocationFlags::POSITION_VALID | xr::SpaceLocationFlags::ORIENTATION_VALID)
             {
                 let p = loc.pose;
                 let q = Quat::from_xyzw(p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w);
@@ -417,7 +489,11 @@ mod tests {
     #[test]
     fn symmetric_projection_matches_aurora_perspective() {
         let half = 45f32.to_radians();
-        let e = EyeView { position: Vec3::ZERO, orientation: Quat::IDENTITY, fov: [-half, half, half, -half] };
+        let e = EyeView {
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            fov: [-half, half, half, -half],
+        };
         let a = e.projection(0.1);
         let b = glam::camera::rh::proj::directx::perspective_infinite_reverse(2.0 * half, 1.0, 0.1);
         assert!(a.abs_diff_eq(b, 1e-4), "{a:?} vs {b:?}");
@@ -427,8 +503,14 @@ mod tests {
     fn swapchain_format_follows_the_window() {
         let srgb = vk::Format::B8G8R8A8_SRGB.as_raw() as u32;
         let rgba = vk::Format::R8G8B8A8_UNORM.as_raw() as u32;
-        assert_eq!(pick_format(&[rgba, srgb], wgpu::TextureFormat::Bgra8UnormSrgb).map(|f| f.1), Some(wgpu::TextureFormat::Bgra8UnormSrgb));
-        assert_eq!(pick_format(&[srgb], wgpu::TextureFormat::Bgra8Unorm).map(|f| f.1), Some(wgpu::TextureFormat::Bgra8UnormSrgb));
+        assert_eq!(
+            pick_format(&[rgba, srgb], wgpu::TextureFormat::Bgra8UnormSrgb).map(|f| f.1),
+            Some(wgpu::TextureFormat::Bgra8UnormSrgb)
+        );
+        assert_eq!(
+            pick_format(&[srgb], wgpu::TextureFormat::Bgra8Unorm).map(|f| f.1),
+            Some(wgpu::TextureFormat::Bgra8UnormSrgb)
+        );
         assert_eq!(pick_format(&[rgba], wgpu::TextureFormat::Bgra8Unorm), None);
     }
 
@@ -439,7 +521,11 @@ mod tests {
         assert!(m.transform_vector3(Vec3::Y).abs_diff_eq(Vec3::Z, 1e-6));
         let turned = world_from_stage(Vec3::ZERO, std::f32::consts::FRAC_PI_2);
         assert!(turned.transform_vector3(Vec3::NEG_Z).abs_diff_eq(Vec3::Y, 1e-6));
-        let e = EyeView { position: Vec3::new(0.0, 1.6, 0.0), orientation: Quat::IDENTITY, fov: [-1.0, 1.0, 1.0, -1.0] };
+        let e = EyeView {
+            position: Vec3::new(0.0, 1.6, 0.0),
+            orientation: Quat::IDENTITY,
+            fov: [-1.0, 1.0, 1.0, -1.0],
+        };
         assert!(e.position_in(m).abs_diff_eq(Vec3::new(10.0, 20.0, 31.6), 1e-5));
         // a point ahead of the player is in front of the camera (-Z in view space)
         let ahead = e.view_in(m).transform_point3(Vec3::new(15.0, 20.0, 31.6));
@@ -448,7 +534,11 @@ mod tests {
 
     #[test]
     fn view_is_inverse_of_pose() {
-        let e = EyeView { position: Vec3::new(1.0, 1.6, 0.0), orientation: Quat::from_rotation_y(0.5), fov: [-1.0, 1.0, 1.0, -1.0] };
+        let e = EyeView {
+            position: Vec3::new(1.0, 1.6, 0.0),
+            orientation: Quat::from_rotation_y(0.5),
+            fov: [-1.0, 1.0, 1.0, -1.0],
+        };
         let p = e.view() * Vec3::new(1.0, 1.6, 0.0).extend(1.0);
         assert!(p.truncate().length() < 1e-5);
     }

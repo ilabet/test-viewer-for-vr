@@ -259,6 +259,8 @@ pub struct App {
     camera: Camera,
     input: MoveInput,
     joystick: joystick::State,
+    /// VR controllers (AURORA_VR=1).
+    vr: crate::vr::VrControls,
     /// Keys and bindable mouse buttons held down.
     down: HashSet<Input>,
     shift: bool,
@@ -1114,6 +1116,7 @@ impl App {
             camera: Camera::default(),
             input: MoveInput::default(),
             joystick: Default::default(),
+            vr: Default::default(),
             down: HashSet::new(),
             shift: false,
             ctrl: false,
@@ -6702,6 +6705,16 @@ impl App {
             i.up || joystick_up,
         );
         self.joystick_avatar(&mut i);
+        let vr = self
+            .vr
+            .apply(&mut i, self.world.agent.flying, self.world.agent.is_sitting(), Instant::now(), dt);
+        if vr.toggle_fly {
+            self.toggle_fly();
+        }
+        if vr.stand {
+            self.sit_stand_shortcut();
+        }
+        self.world.agent.yaw += vr.turn;
         if self.camera.free().is_some() {
             // the photo's free camera takes the movement keys: the avatar
             // stays where it is (no walk, turn, jump or flight start).
@@ -9882,6 +9895,20 @@ impl App {
         // returned are those of the frame before; a frame that carries a
         // capture is waited for, its pixels are read in the tail below.
         let lists = if self.in_world() { &self.scene.lists } else { &self.empty_lists };
+        // AURORA_VR=1: the headset's eyes first, from the avatar's place; the
+        // window keeps its own view
+        #[cfg(feature = "openxr")]
+        if gfx.renderer.xr_active()
+            && let Some(pad) = crate::vr::draw_eyes(
+                &mut gfx.renderer,
+                &fp,
+                lists,
+                self.world.agent.position - glam::Vec3::Z * crate::vr::AGENT_TO_FEET,
+                self.world.agent.yaw,
+            )
+        {
+            self.vr.pad = pad;
+        }
         let stats = gfx.renderer.render(fp, lists, Some(egui_frame));
         self.photo_drawn(&mut gfx.renderer);
         self.last_render = stats;

@@ -74,7 +74,12 @@ mod imp {
         pub fn start(self, size: (u32, u32), format: wgpu::TextureFormat) -> Option<XrState> {
             let (runtime, gpu) = self.gpu?;
             match XrSession::new(&runtime, &gpu, size, format) {
-                Ok(session) => Some(XrState { runtime, _gpu: gpu, session, frame: None }),
+                Ok(session) => Some(XrState {
+                    runtime,
+                    _gpu: gpu,
+                    session,
+                    frame: None,
+                }),
                 Err(e) => {
                     log::warn!("VR: {e}; staying on the desktop");
                     None
@@ -119,7 +124,10 @@ mod imp {
 
         pub fn eye_target(&self, layer: u32) -> Option<XrEyeTarget> {
             let frame = self.frame.as_ref()?;
-            Some(XrEyeTarget { texture: self.session.targets[frame.image].clone(), layer })
+            Some(XrEyeTarget {
+                texture: self.session.targets[frame.image].clone(),
+                layer,
+            })
         }
 
         /// Hands the frame's two eyes to the headset.
