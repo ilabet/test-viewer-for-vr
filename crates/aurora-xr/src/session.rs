@@ -30,8 +30,20 @@ impl EyeView {
         Mat4::from_rotation_translation(self.orientation, self.position).inverse()
     }
 
-    /// Off-axis, reversed-Z-free right-handed projection (depth 0..1).
-    pub fn projection(&self, near: f32, far: f32) -> Mat4 {
+    /// View matrix in the Second Life world (Z up), with the stage placed by
+    /// [`world_from_stage`].
+    pub fn view_in(&self, world_from_stage: Mat4) -> Mat4 {
+        (world_from_stage * Mat4::from_rotation_translation(self.orientation, self.position)).inverse()
+    }
+
+    /// Eye position in the Second Life world.
+    pub fn position_in(&self, world_from_stage: Mat4) -> Vec3 {
+        world_from_stage.transform_point3(self.position)
+    }
+
+    /// Off-axis projection in Aurora's convention: right-handed, infinite
+    /// far plane, reversed depth (near plane at 1, infinity at 0).
+    pub fn projection(&self, near: f32) -> Mat4 {
         let [l, r, u, d] = self.fov.map(f32::tan);
         let (w, h) = (r - l, u - d);
         Mat4::from_cols_array(&[
@@ -45,14 +57,23 @@ impl EyeView {
             0.0,
             (r + l) / w,
             (u + d) / h,
-            far / (near - far),
+            0.0,
             -1.0,
             0.0,
             0.0,
-            near * far / (near - far),
+            near,
             0.0,
         ])
     }
+}
+
+/// Places the VR stage (Y up, -Z forward, metres) in the Second Life world
+/// (Z up, X east): `origin` is the point under the player's feet and `yaw`
+/// the direction the stage's forward faces (radians from +X, counter-clockwise).
+pub fn world_from_stage(origin: Vec3, yaw: f32) -> Mat4 {
+    // stage +X (right) -> -Y, stage +Y (up) -> +Z, stage +Z (back) -> -X
+    let axes = Mat4::from_cols(Vec3::NEG_Y.extend(0.0), Vec3::Z.extend(0.0), Vec3::NEG_X.extend(0.0), glam::Vec4::W);
+    Mat4::from_translation(origin) * Mat4::from_rotation_z(yaw) * axes
 }
 
 /// Controller state of a frame, VRChat-style: left stick moves, right stick
@@ -384,14 +405,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn symmetric_projection_matches_perspective() {
+    fn symmetric_projection_matches_aurora_perspective() {
         let half = 45f32.to_radians();
         let e = EyeView { position: Vec3::ZERO, orientation: Quat::IDENTITY, fov: [-half, half, half, -half] };
-        let a = e.projection(0.1, 100.0);
-        // right-handed perspective, depth 0..1, 90 degrees, square
-        let (n, f) = (0.1f32, 100.0f32);
-        let b = Mat4::from_cols_array(&[1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, f / (n - f), -1.0, 0.0, 0.0, n * f / (n - f), 0.0]);
+        let a = e.projection(0.1);
+        let b = glam::camera::rh::proj::directx::perspective_infinite_reverse(2.0 * half, 1.0, 0.1);
         assert!(a.abs_diff_eq(b, 1e-4), "{a:?} vs {b:?}");
+    }
+
+    #[test]
+    fn stage_forward_is_world_yaw() {
+        let m = world_from_stage(Vec3::new(10.0, 20.0, 30.0), 0.0);
+        assert!(m.transform_vector3(Vec3::NEG_Z).abs_diff_eq(Vec3::X, 1e-6));
+        assert!(m.transform_vector3(Vec3::Y).abs_diff_eq(Vec3::Z, 1e-6));
+        let turned = world_from_stage(Vec3::ZERO, std::f32::consts::FRAC_PI_2);
+        assert!(turned.transform_vector3(Vec3::NEG_Z).abs_diff_eq(Vec3::Y, 1e-6));
+        let e = EyeView { position: Vec3::new(0.0, 1.6, 0.0), orientation: Quat::IDENTITY, fov: [-1.0, 1.0, 1.0, -1.0] };
+        assert!(e.position_in(m).abs_diff_eq(Vec3::new(10.0, 20.0, 31.6), 1e-5));
+        // a point ahead of the player is in front of the camera (-Z in view space)
+        let ahead = e.view_in(m).transform_point3(Vec3::new(15.0, 20.0, 31.6));
+        assert!(ahead.z < 0.0 && ahead.x.abs() < 1e-4);
     }
 
     #[test]
