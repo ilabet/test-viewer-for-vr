@@ -6743,7 +6743,7 @@ impl App {
             // + right button = walk forward (LLToolCamera::handleRightMouseDown)
             i.forward |= self.right_drag;
         }
-        i.run = self.temp_run.is_some() || self.joystick.running;
+        i.run = self.temp_run.is_some() || self.joystick.running || self.vr.running;
         if self.world.rlva.has("temprun") {
             i.run = false;
         }
@@ -9908,6 +9908,9 @@ impl App {
             )
         {
             self.vr.pad = pad;
+        } else {
+            // a paused headset leaves no stick held
+            self.vr.pad = Default::default();
         }
         let stats = gfx.renderer.render(fp, lists, Some(egui_frame));
         self.photo_drawn(&mut gfx.renderer);

@@ -50,6 +50,8 @@ pub struct VrControls {
     turn_latched: bool,
     /// Snap turn step in degrees; 0 turns smoothly.
     pub snap_degrees: f32,
+    /// The left stick is pushed fully: run.
+    pub running: bool,
 }
 
 impl Default for VrControls {
@@ -60,6 +62,7 @@ impl Default for VrControls {
             last_jump: None,
             turn_latched: false,
             snap_degrees: 30.0,
+            running: false,
         }
     }
 }
@@ -74,7 +77,7 @@ impl VrControls {
         i.back |= m.y < -DEAD_ZONE;
         i.strafe_right |= m.x > DEAD_ZONE;
         i.strafe_left |= m.x < -DEAD_ZONE;
-        i.run |= m.length() > RUN_AT;
+        self.running = m.length() > RUN_AT;
         let moving = m.length() > DEAD_ZONE;
 
         let jump_pressed = pad.jump && !self.last.jump;
@@ -176,7 +179,7 @@ mod tests {
             false,
             now,
         );
-        assert!(i.forward && !i.back && !i.run);
+        assert!(i.forward && !i.back && !c.running);
         let (i, _) = step(
             &mut c,
             VrPad {
@@ -187,7 +190,7 @@ mod tests {
             false,
             now,
         );
-        assert!(i.strafe_left && i.run);
+        assert!(i.strafe_left && c.running);
         let (i, _) = step(
             &mut c,
             VrPad {
