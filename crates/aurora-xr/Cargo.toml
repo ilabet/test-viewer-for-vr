@@ -16,3 +16,4 @@ thiserror = "2.0.21"
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openxr = { version = "0.22.0", features = ["loaded"] }
 ash = "0.38"
+wgpu = "30.0.1"

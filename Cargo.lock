@@ -794,6 +794,7 @@ dependencies = [
  "log",
  "openxr",
  "thiserror 2.0.21",
+ "wgpu",
 ]
 
 [[package]]
