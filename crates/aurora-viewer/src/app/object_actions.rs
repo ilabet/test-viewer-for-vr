@@ -163,7 +163,8 @@ impl App {
     }
 
     pub(super) fn update_object_hold(&mut self, renderer: &Renderer) {
-        if self.build.open || !self.left_down {
+        // the left button, or a VR trigger (app/vr_actions.rs), keeps the touch
+        if self.build.open || !(self.left_down || self.vr.pad.trigger.iter().any(|&t| t)) {
             self.release_object_hold();
             return;
         }
