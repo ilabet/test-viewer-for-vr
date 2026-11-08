@@ -1,0 +1,18 @@
+[package]
+name = "aurora-xr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+glam = { version = "0.34.1", features = ["bytemuck"] }
+log = "0.4.34"
+thiserror = "2.0.21"
+
+# OpenXR, loaded at run time (no link-time dependency on the loader): the
+# viewer starts normally on PCs without a VR runtime.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+openxr = { version = "0.22.0", features = ["loaded"] }
+ash = "0.38"
