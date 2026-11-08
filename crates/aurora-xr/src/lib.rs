@@ -14,7 +14,7 @@ mod vulkan;
 #[cfg(not(target_os = "macos"))]
 pub use runtime::{XrRuntime, XrSystemInfo};
 #[cfg(not(target_os = "macos"))]
-pub use vulkan::XrGpu;
+pub use vulkan::{XrAdapter, XrGpu};
 #[cfg(not(target_os = "macos"))]
 pub use session::{EyeView, XrFrame, XrInput, XrSession};
 
