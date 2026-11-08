@@ -82,6 +82,7 @@ viewer's process closes. For a test with human intervention, keep the title
 | `AURORA_DEMO=1` | Offline demo mode |
 | `AURORA_DEMO_AVATAR_RENDER_SETTINGS=1\|empty` | Open the avatar display-exceptions editor |
 | `AURORA_DEMO_POS="x,y"` | Start position |
+| `AURORA_VR_SIM=1` | Simulated VR headset and scripted controller (build with `--features openxr`) |
 | `AURORA_DEMO_PORTALS=1\|near\|friends` | Open the portal creator and a shared-portal preview |
 | `AURORA_PORTAL_CLIP=0` | Disable avatar portal clipping for before/after comparison |
 | `AURORA_DEMO_TOD=0..5` | Time of day (5: the legacy midday) |
@@ -1174,6 +1175,18 @@ when unfocused") is ignored during a screenshot.
 - **`AURORA_DEMO_CHATCMD="calc 2+2;rolld 2 20"`**: lines typed in the chat
   bar at frame 240, separated by `;` (chat bar commands: `calc`, `rolld`,
   `gtp`…).
+
+- **`AURORA_VR_SIM=1`** (build with `--features openxr`): a simulated VR
+  headset on the desktop GPU instead of an OpenXR runtime, and a scripted
+  controller looping every 30 seconds (`vr::sim_pad`).
+  - With `AURORA_DEMO=1`: the window follows the simulated head, swaying
+    slowly; the avatar walks (2–5 s), snap-turns 30° right twice and left once,
+    double-taps A to fly, rises, descends and lands (9–14.5 s); B opens the
+    "VR menu" floater (16 s), the highlight moves down, the trigger turns
+    "Always run" on (19 s) and the turning to smooth (21 s); B closes it
+    (22 s); the trigger touches what the right controller points at (23.5 s),
+    the grip sits on it (25 s) and stands up (27 s). The floater in the lower
+    left shows the sticks and the A, X, B, trigger and grip buttons.
 
 ## Objects and building
 
