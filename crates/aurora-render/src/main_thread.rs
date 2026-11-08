@@ -1377,6 +1377,17 @@ struct OpenedDevice {
 /// Open `adapter` with the features the renderer needs and the optional
 /// ones it has; an error when it lacks a needed one or the device fails.
 fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
+    open_device_with(adapter, |adapter, desc| {
+        pollster::block_on(adapter.request_device(desc)).map_err(|e| RenderError::Device(e.to_string()))
+    })
+}
+
+/// [`open_device`] with the final device creation left to `create` (the
+/// OpenXR path creates the Vulkan device through the VR runtime).
+fn open_device_with(
+    adapter: &wgpu::Adapter,
+    create: impl FnOnce(&wgpu::Adapter, &wgpu::DeviceDescriptor) -> Result<(wgpu::Device, wgpu::Queue), RenderError>,
+) -> Result<OpenedDevice, RenderError> {
     let afeat = adapter.features();
     let alim = adapter.limits();
     let bindless_feats =
@@ -1435,15 +1446,17 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
         features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
     }
     let max_textures = texture_page_limit(&alim);
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aurora"),
-        required_features: features,
-        required_limits: alim.clone(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        trace: wgpu::Trace::Off,
-    }))
-    .map_err(|e| RenderError::Device(e.to_string()))?;
+    let (device, queue) = create(
+        adapter,
+        &wgpu::DeviceDescriptor {
+            label: Some("aurora"),
+            required_features: features,
+            required_limits: alim.clone(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        },
+    )?;
     Ok(OpenedDevice {
         device,
         queue,
