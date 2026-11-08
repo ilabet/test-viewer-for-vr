@@ -641,6 +641,7 @@ dependencies = [
  "ash",
  "aurora-assets",
  "aurora-llsd",
+ "aurora-xr",
  "bcdec_rs",
  "bytemuck",
  "egui",
