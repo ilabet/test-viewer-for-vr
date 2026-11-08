@@ -12740,3 +12740,15 @@ import-source-folder-name-help = Name of the inventory folder for { $source }. T
 
 import-local-stage-upload = Add to upload ({ $count })
 import-local-stage-upload-help = Keep the local previews and prepare uploads of the checked files, including hidden files. Upload fees are confirmed separately.
+
+vr-menu-title = VR menu
+vr-menu-hint = Right stick: choose · Trigger: select · B/Y: close
+vr-menu-fly = Fly
+vr-menu-land = Land
+vr-menu-sit = Sit down
+vr-menu-stand = Stand up
+vr-menu-always-run = Always run
+vr-menu-snap-turn = Turning: snap
+vr-menu-smooth-turn = Turning: smooth
+vr-menu-close = Close
+vr-sim-title = Simulated headset (AURORA_VR_SIM)

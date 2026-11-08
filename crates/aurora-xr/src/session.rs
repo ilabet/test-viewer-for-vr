@@ -92,7 +92,7 @@ pub struct XrInput {
 }
 
 /// A frame the renderer must draw: two eyes into `targets[image]` layers 0/1.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct XrFrame {
     pub display_time: xr::Time,
     pub eyes: [EyeView; 2],

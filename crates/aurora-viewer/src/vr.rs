@@ -1,11 +1,13 @@
 //! VR controllers (AURORA_VR=1, `openxr` feature), VRChat-style: left stick
 //! moves, right stick turns (snap or smooth), A jumps and a double tap flies,
 //! while flying A rises and X descends, grip or moving stands up from a seat,
-//! B/Y opens the menu.
+//! B/Y opens the menu (right stick chooses, trigger selects); otherwise
+//! the trigger touches what the controller points at and the grip sits on it.
+//! AURORA_VR_SIM=1 plays a scripted controller over a simulated headset.
 
 use std::time::{Duration, Instant};
 
-use glam::Vec2;
+use glam::{Mat4, Vec2, Vec3};
 
 use crate::agent::MoveInput;
 
@@ -16,6 +18,7 @@ const SNAP_RELEASE: f32 = 0.3;
 const DOUBLE_TAP: Duration = Duration::from_millis(350);
 /// From the agent's position (its centre) down to its feet, where the VR
 /// stage's floor goes.
+#[cfg_attr(not(feature = "openxr"), allow(dead_code))]
 pub const AGENT_TO_FEET: f32 = 0.9;
 /// Smooth turn at full deflection, radians per second.
 const SMOOTH_RATE: f32 = 2.5;
@@ -32,6 +35,24 @@ pub struct VrPad {
     pub grip: [bool; 2],
 }
 
+/// The entries of the VR menu, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItem {
+    Fly,
+    SitStand,
+    AlwaysRun,
+    TurnMode,
+    Close,
+}
+
+pub const MENU: [MenuItem; 5] = [
+    MenuItem::Fly,
+    MenuItem::SitStand,
+    MenuItem::AlwaysRun,
+    MenuItem::TurnMode,
+    MenuItem::Close,
+];
+
 /// What a frame of controller input asks beyond the movement keys.
 #[derive(Debug, Default, PartialEq)]
 pub struct VrActions {
@@ -39,7 +60,14 @@ pub struct VrActions {
     pub turn: f32,
     pub toggle_fly: bool,
     pub stand: bool,
+    /// B/Y pressed: the menu opened or closed.
     pub menu: bool,
+    /// The trigger chose this menu entry.
+    pub pick: Option<MenuItem>,
+    /// The trigger of this hand (0 left, 1 right) was pressed, menu closed.
+    pub point: Option<usize>,
+    /// The grip of this hand was pressed while standing.
+    pub grab: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -52,6 +80,17 @@ pub struct VrControls {
     pub snap_degrees: f32,
     /// The left stick is pushed fully: run.
     pub running: bool,
+    pub menu_open: bool,
+    pub menu_sel: usize,
+    menu_latched: bool,
+    /// Controller aim rays in the stage (origin, direction).
+    pub aim: [Option<(Vec3, Vec3)>; 2],
+    /// The stage in the world, for this frame.
+    pub stage: Mat4,
+    /// AURORA_VR_SIM=1: the scripted controller's start.
+    pub sim: Option<Instant>,
+    #[cfg(feature = "openxr")]
+    frame: Option<aurora_render::aurora_xr::XrFrame>,
 }
 
 impl Default for VrControls {
@@ -63,6 +102,14 @@ impl Default for VrControls {
             turn_latched: false,
             snap_degrees: 30.0,
             running: false,
+            menu_open: false,
+            menu_sel: 0,
+            menu_latched: false,
+            aim: [None; 2],
+            stage: Mat4::IDENTITY,
+            sim: sim_wanted().then(Instant::now),
+            #[cfg(feature = "openxr")]
+            frame: None,
         }
     }
 }
@@ -95,7 +142,17 @@ impl VrControls {
             i.down |= pad.descend;
         }
 
-        let x = pad.turn_stick.x;
+        let x = if self.menu_open { 0.0 } else { pad.turn_stick.x };
+        if self.menu_open {
+            let y = pad.turn_stick.y;
+            if y.abs() > SNAP_AT && !self.menu_latched {
+                let n = MENU.len();
+                self.menu_sel = (self.menu_sel + if y < 0.0 { 1 } else { n - 1 }) % n;
+                self.menu_latched = true;
+            } else if y.abs() < SNAP_RELEASE {
+                self.menu_latched = false;
+            }
+        }
         if self.snap_degrees > 0.0 {
             if x.abs() > SNAP_AT && !self.turn_latched {
                 out.turn = -x.signum() * self.snap_degrees.to_radians();
@@ -107,9 +164,25 @@ impl VrControls {
             out.turn = -x * SMOOTH_RATE * dt;
         }
 
-        let grip_pressed = (0..2).any(|h| pad.grip[h] && !self.last.grip[h]);
-        out.stand = seated && (moving || jump_pressed || grip_pressed);
+        let grip = (0..2).find(|&h| pad.grip[h] && !self.last.grip[h]);
+        out.stand = seated && (moving || jump_pressed || grip.is_some());
+        if !seated {
+            out.grab = grip;
+        }
         out.menu = pad.menu && !self.last.menu;
+        if out.menu {
+            self.menu_open = !self.menu_open;
+            self.menu_sel = 0;
+        }
+        if let Some(h) = (0..2).find(|&h| pad.trigger[h] && !self.last.trigger[h]) {
+            if self.menu_open {
+                let item = MENU[self.menu_sel.min(MENU.len() - 1)];
+                self.menu_open &= item != MenuItem::Close;
+                out.pick = Some(item);
+            } else {
+                out.point = Some(h);
+            }
+        }
         self.last = pad;
         out
     }
@@ -130,28 +203,109 @@ impl From<&aurora_render::aurora_xr::XrInput> for VrPad {
     }
 }
 
-/// Draws the headset's two eyes from the avatar's place (`feet`, `yaw`) and
-/// returns its controllers, or `None` when the headset wants no frame.
-#[cfg(feature = "openxr")]
-pub fn draw_eyes(
-    renderer: &mut aurora_render::Renderer,
-    fp: &aurora_render::FrameParams,
-    lists: &aurora_render::DrawLists,
-    feet: glam::Vec3,
-    yaw: f32,
-) -> Option<VrPad> {
-    let frame = renderer.xr_begin_frame()?;
-    let stage = aurora_render::aurora_xr::world_from_stage(feet, yaw);
-    for (layer, eye) in frame.eyes.iter().enumerate() {
-        let mut p = fp.clone();
-        p.view = eye.view_in(stage);
-        p.proj = eye.projection(fp.near);
-        p.camera_pos = eye.position_in(stage);
-        p.fov_y = eye.fov[2] - eye.fov[3];
-        renderer.render_xr_eye(p, lists, layer as u32);
+/// AURORA_VR_SIM=1 (with the `openxr` feature): the scripted controller.
+fn sim_wanted() -> bool {
+    cfg!(feature = "openxr") && std::env::var("AURORA_VR_SIM").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "off" | "false" | "no"))
+}
+
+impl VrControls {
+    /// A controller's aim ray in the world (origin, direction).
+    pub fn aim_world(&self, hand: usize) -> Option<(Vec3, Vec3)> {
+        let (o, d) = self.aim[hand]?;
+        Some((self.stage.transform_point3(o), self.stage.transform_vector3(d).try_normalize()?))
     }
-    renderer.xr_end_frame();
-    Some(VrPad::from(&frame.input))
+
+    /// The headset's frame is under way: its eyes are to be drawn.
+    #[cfg_attr(not(feature = "openxr"), allow(dead_code))]
+    pub fn has_frame(&self) -> bool {
+        #[cfg(feature = "openxr")]
+        return self.frame.is_some();
+        #[cfg(not(feature = "openxr"))]
+        false
+    }
+
+    /// The head in the world: its place and where it looks.
+    pub fn head(&self) -> Option<(Vec3, Vec3)> {
+        #[cfg(feature = "openxr")]
+        {
+            let [l, r] = &self.frame.as_ref()?.eyes;
+            let pos = self.stage.transform_point3((l.position + r.position) * 0.5);
+            let fwd = self.stage.transform_vector3(l.orientation * Vec3::NEG_Z);
+            Some((pos, fwd.try_normalize()?))
+        }
+        #[cfg(not(feature = "openxr"))]
+        None
+    }
+}
+
+#[cfg(feature = "openxr")]
+impl VrControls {
+    /// Waits for the headset's next frame, its stage at the avatar's place
+    /// (`feet`, `yaw`), and reads its controllers.
+    pub fn begin(&mut self, renderer: &mut aurora_render::Renderer, feet: Vec3, yaw: f32) {
+        self.frame = renderer.xr_begin_frame();
+        self.stage = aurora_render::aurora_xr::world_from_stage(feet, yaw);
+        match &self.frame {
+            Some(f) => {
+                self.pad = VrPad::from(&f.input);
+                self.aim = f.input.aim;
+            }
+            // a paused headset leaves no stick held
+            None => self.pad = VrPad::default(),
+        }
+        if let Some(start) = self.sim {
+            self.pad = sim_pad(start.elapsed().as_secs_f32());
+        }
+    }
+
+    /// Draws both eyes of the frame begun, then hands it to the headset.
+    pub fn draw_eyes(
+        &mut self,
+        renderer: &mut aurora_render::Renderer,
+        fp: &aurora_render::FrameParams,
+        lists: &aurora_render::DrawLists,
+        ui: [Option<aurora_render::EguiFrame>; 2],
+    ) {
+        let Some(frame) = self.frame.take() else { return };
+        for ((layer, eye), ui) in frame.eyes.iter().enumerate().zip(ui) {
+            let mut p = fp.clone();
+            p.view = eye.view_in(self.stage);
+            p.proj = eye.projection(fp.near);
+            p.camera_pos = eye.position_in(self.stage);
+            p.fov_y = eye.fov[2] - eye.fov[3];
+            renderer.render_xr_eye(p, lists, layer as u32, ui);
+        }
+        renderer.xr_end_frame();
+    }
+}
+
+/// The scripted controller of AURORA_VR_SIM, `t` seconds in (a 30 s loop):
+/// walk, snap turns, double tap to fly, rise, descend, land, the menu
+/// (choose and select twice), touch what is ahead, sit on it, stand up.
+#[cfg_attr(not(feature = "openxr"), allow(dead_code))]
+pub fn sim_pad(t: f32) -> VrPad {
+    let t = t % 30.0;
+    let at = |a: f32, b: f32| (a..b).contains(&t);
+    let tap = |a: f32| at(a, a + 0.12);
+    let mut p = VrPad::default();
+    if at(2.0, 5.0) {
+        p.move_stick.y = 0.6;
+    }
+    if at(5.5, 5.8) || at(6.5, 6.8) {
+        p.turn_stick.x = 1.0;
+    }
+    if at(7.5, 7.8) {
+        p.turn_stick.x = -1.0;
+    }
+    p.jump = tap(9.0) || tap(9.25) || at(10.0, 12.0) || tap(14.0) || tap(14.25);
+    p.descend = at(12.5, 13.5);
+    p.menu = tap(16.0) || tap(22.0);
+    if at(17.0, 17.2) || at(18.0, 18.2) || at(20.0, 20.2) {
+        p.turn_stick.y = -1.0;
+    }
+    p.trigger[1] = tap(19.0) || tap(21.0) || tap(23.5);
+    p.grip[1] = tap(25.0) || tap(27.0);
+    p
 }
 
 #[cfg(test)]
@@ -346,6 +500,42 @@ mod tests {
             now,
         );
         assert!(!a.stand);
+    }
+
+    #[test]
+    fn menu_chooses_with_the_stick_and_selects_with_the_trigger() {
+        let mut c = VrControls::default();
+        let now = Instant::now();
+        let press = |menu, y: f32, trigger| VrPad {
+            menu,
+            turn_stick: Vec2::new(0.0, y),
+            trigger: [false, trigger],
+            ..Default::default()
+        };
+        step(&mut c, press(true, 0.0, false), false, false, now);
+        assert!(c.menu_open);
+        step(&mut c, press(false, -1.0, false), false, false, now);
+        step(&mut c, press(false, -1.0, false), false, false, now);
+        step(&mut c, press(false, 0.0, false), false, false, now);
+        step(&mut c, press(false, -1.0, false), false, false, now);
+        let (_, a) = step(&mut c, press(false, 0.0, true), false, false, now);
+        assert_eq!(a.pick, Some(MenuItem::AlwaysRun));
+        assert_eq!(a.turn, 0.0);
+        step(&mut c, press(true, 0.0, false), false, false, now);
+        assert!(!c.menu_open);
+        let (_, a) = step(&mut c, press(false, 0.0, true), false, false, now);
+        assert_eq!((a.pick, a.point), (None, Some(1)));
+    }
+
+    #[test]
+    fn grip_sits_while_standing() {
+        let mut c = VrControls::default();
+        let grip = VrPad {
+            grip: [true, false],
+            ..Default::default()
+        };
+        let (_, a) = step(&mut c, grip, false, false, Instant::now());
+        assert_eq!((a.grab, a.stand), (Some(0), false));
     }
 
     #[test]

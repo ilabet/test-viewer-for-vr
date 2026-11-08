@@ -121,6 +121,7 @@ mod texture_library;
 mod texture_refresh;
 mod viewer_stats;
 mod viewfinder;
+mod vr_actions;
 mod wearable_editor;
 mod world_click_demo;
 mod worn_demo;
@@ -6715,6 +6716,15 @@ impl App {
             self.sit_stand_shortcut();
         }
         self.world.agent.yaw += vr.turn;
+        if let Some(item) = vr.pick {
+            self.vr_menu_pick(item);
+        }
+        if let Some(hand) = vr.point {
+            self.vr_point(hand, false);
+        }
+        if let Some(hand) = vr.grab {
+            self.vr_point(hand, true);
+        }
         if self.camera.free().is_some() {
             // the photo's free camera takes the movement keys: the avatar
             // stays where it is (no walk, turn, jump or flight start).
@@ -8357,6 +8367,16 @@ impl App {
         {
             gfx.renderer.apply_settings(self.settings.render_settings());
         }
+        // AURORA_VR=1: wait for the headset's frame; the window shows its head
+        #[cfg(feature = "openxr")]
+        if gfx.renderer.xr_active() {
+            let feet = self.world.agent.position - glam::Vec3::Z * crate::vr::AGENT_TO_FEET;
+            self.vr.begin(&mut gfx.renderer, feet, self.world.agent.yaw);
+        }
+        if let Some((pos, fwd)) = self.vr.head() {
+            self.camera.position = pos;
+            self.camera.target = pos + fwd;
+        }
         let mut view = self.camera.view();
         let mut proj = frame_proj(&self.camera);
         let mut vp = proj * view;
@@ -8650,6 +8670,10 @@ impl App {
                 self.net.send(NetCommand::SetFov(self.sent_fov));
             }
             if camera_changed {
+                if let Some((pos, fwd)) = self.vr.head() {
+                    self.camera.position = pos;
+                    self.camera.target = pos + fwd;
+                }
                 view = self.camera.view();
                 proj = frame_proj(&self.camera);
                 vp = proj * view;
@@ -9789,6 +9813,18 @@ impl App {
             .handle_platform_output_with_event_loop(&gfx.window, event_loop, full.platform_output);
         self.perf.ui_ms = t_ui.elapsed().as_secs_f32() * 1000.0;
         self.frame_profile.lap(Lap::Hover);
+        // the menu over the headset's eyes too (and the simulation's readout)
+        #[cfg(feature = "openxr")]
+        let eye_ui: [Option<aurora_render::EguiFrame>; 2] = if self.vr.has_frame() && (self.vr.menu_open || self.vr.sim.is_some()) {
+            std::array::from_fn(|_| {
+                Some(
+                    self.egui_hand_over
+                        .frame(&ctx, full.shapes.clone(), Default::default(), full.pixels_per_point),
+                )
+            })
+        } else {
+            Default::default()
+        };
         let egui_frame = self.egui_hand_over.frame(
             &ctx,
             std::mem::take(&mut full.shapes),
@@ -9895,24 +9931,14 @@ impl App {
         // returned are those of the frame before; a frame that carries a
         // capture is waited for, its pixels are read in the tail below.
         let lists = if self.in_world() { &self.scene.lists } else { &self.empty_lists };
-        // AURORA_VR=1: the headset's eyes first, from the avatar's place; the
-        // window keeps its own view
         #[cfg(feature = "openxr")]
-        if gfx.renderer.xr_active()
-            && let Some(pad) = crate::vr::draw_eyes(
-                &mut gfx.renderer,
-                &fp,
-                lists,
-                self.world.agent.position - glam::Vec3::Z * crate::vr::AGENT_TO_FEET,
-                self.world.agent.yaw,
-            )
-        {
-            self.vr.pad = pad;
-        } else {
-            // a paused headset leaves no stick held
-            self.vr.pad = Default::default();
-        }
+        let eye_fp = self.vr.has_frame().then(|| fp.clone());
         let stats = gfx.renderer.render(fp, lists, Some(egui_frame));
+        // AURORA_VR=1: then the headset's eyes, from the avatar's place
+        #[cfg(feature = "openxr")]
+        if let Some(fp) = eye_fp {
+            self.vr.draw_eyes(&mut gfx.renderer, &fp, lists, eye_ui);
+        }
         self.photo_drawn(&mut gfx.renderer);
         self.last_render = stats;
         if stats.presented && !gfx.shown {
@@ -13154,6 +13180,7 @@ impl App {
         let mut a = UiActions::default();
         let p = self.palette;
         let ctx = ui.ctx().clone();
+        self.vr_menu_ui(&ctx);
         ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();

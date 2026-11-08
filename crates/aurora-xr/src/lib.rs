@@ -12,6 +12,8 @@ mod session;
 mod vulkan;
 
 #[cfg(not(target_os = "macos"))]
+pub use openxr as xr;
+#[cfg(not(target_os = "macos"))]
 pub use runtime::{XrRuntime, XrSystemInfo};
 #[cfg(not(target_os = "macos"))]
 pub use session::{EyeView, XrFrame, XrInput, XrSession, world_from_stage};

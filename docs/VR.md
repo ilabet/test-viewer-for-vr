@@ -32,10 +32,26 @@ macOS has no OpenXR runtime with Vulkan: the feature does nothing there.
 | Right stick | Snap turn (30°) |
 | A | Jump; double tap toggles flying; while flying, hold to rise |
 | X | While flying, hold to descend |
-| Grip | Stand up when seated |
+| B / Y | Open or close the VR menu |
+| Trigger | Touch the object the controller points at (as a left click); in the menu, select |
+| Grip | Sit on the object the controller points at; stand up when seated |
 | Moving or jumping while seated | Stand up |
 
-Not wired yet: B/Y menu, trigger pointing and clicking in the world.
+The VR menu, shown in front of you and on the desktop window: Fly / Land,
+Sit down / Stand up, Always run, Turning (snap or smooth), Close. The right
+stick chooses (up/down) while it is open, the trigger selects.
+
+### Trying it without a headset
+
+`AURORA_VR_SIM=1` (with `--features openxr`) replaces the runtime with a
+simulated headset on the desktop GPU: the eyes are drawn as in VR, the window
+follows the simulated head, and a scripted controller loops through walking,
+snap turns, flying, the menu, touching and sitting every 30 seconds. A
+readout of the sticks and buttons sits in the window's lower left corner.
+
+```sh
+AURORA_DEMO=1 AURORA_VR_SIM=1 cargo run -p aurora-viewer --features openxr
+```
 
 ## How it works
 
@@ -49,7 +65,7 @@ Not wired yet: B/Y menu, trigger pointing and clicking in the world.
   eyes are submitted.
 - `aurora-viewer` (`vr.rs`) places the VR floor at the avatar's feet, facing
   the avatar's direction, and maps the controllers onto the movement keys.
-  The desktop window keeps its normal view.
+  While the headset runs, the desktop window shows the view from its head.
 
 ## Known limits
 
@@ -57,4 +73,10 @@ Not wired yet: B/Y menu, trigger pointing and clicking in the world.
   size; the runtime scales the eye images to the display.
 - Draw lists are culled for the window's camera, so objects outside its view
   can be missing in the headset. Mouselook (M) keeps them close.
-- The interface (menus, chat) is shown on the desktop window only.
+- Only the VR menu is drawn into the headset, flat in front of the eyes;
+  the rest of the interface (chat, inventory) is on the desktop window.
+- There is no laser beam drawn yet for the controllers' aim.
+- Temporal anti-aliasing shares its history between the eyes and the
+  window; prefer FXAA or SMAA in VR.
+- The eye images keep the window's size at startup: resizing the window
+  afterwards crops them.

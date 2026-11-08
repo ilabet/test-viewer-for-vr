@@ -446,7 +446,7 @@ impl Renderer {
             lost: lost.clone(),
         })?;
         let xr = if xr_pending.active() {
-            xr_pending.start((width, height), backend.surface_format())
+            xr_pending.start((width, height), backend.surface_format(), &device)
         } else {
             None
         };
@@ -1421,7 +1421,10 @@ impl Renderer {
 
     /// Draws one eye (`layer` 0 left, 1 right) into the headset's image.
     /// The window's requests (hover, clicks, photos) wait for its own frame.
-    pub fn render_xr_eye(&mut self, params: FrameParams, lists: &DrawLists, layer: u32) -> RenderStats {
+    /// `ui`: the interface drawn over the eye (its textures already sent
+    /// with the window's frame).
+    pub fn render_xr_eye(&mut self, params: FrameParams, lists: &DrawLists, layer: u32, ui: Option<crate::EguiFrame>) -> RenderStats {
+        let inv_vp = self.last_inv_vp;
         self.xr_eye = self.xr.as_ref().and_then(|x| x.eye_target(layer));
         let hover = self.hover_request.take();
         let picks = std::mem::take(&mut self.pick_requests);
@@ -1429,7 +1432,9 @@ impl Renderer {
         let snapshot = self.snapshot_request.take();
         let capture = std::mem::take(&mut self.capture_request);
         let histogram = self.histogram_request.take();
-        let stats = self.render(params, lists, None);
+        let stats = self.render(params, lists, ui);
+        // the window's cursor rays stay those of the window's view
+        self.last_inv_vp = inv_vp;
         self.xr_eye = None;
         self.hover_request = hover;
         self.pick_requests = picks;
