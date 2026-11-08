@@ -1178,7 +1178,7 @@ when unfocused") is ignored during a screenshot.
 
 - **`AURORA_VR_SIM=1`** (build with `--features openxr`): a simulated VR
   headset on the desktop GPU instead of an OpenXR runtime, and a scripted
-  controller looping every 30 seconds (`vr::sim_pad`).
+  controller: a 30-second loop (`vr::sim_pad`) advanced 1/30 s per drawn frame, so a slow GPU plays it slower but misses no tap; the times below are script time.
   - With `AURORA_DEMO=1`: the window follows the simulated head, swaying
     slowly; the avatar walks (2–5 s), snap-turns 30° right twice and left once,
     double-taps A to fly, rises, descends and lands (9–14.5 s); B opens the

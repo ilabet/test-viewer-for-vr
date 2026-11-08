@@ -6706,9 +6706,10 @@ impl App {
             i.up || joystick_up,
         );
         self.joystick_avatar(&mut i);
+        let vr_now = self.vr.clock(Instant::now());
         let vr = self
             .vr
-            .apply(&mut i, self.world.agent.flying, self.world.agent.is_sitting(), Instant::now(), dt);
+            .apply(&mut i, self.world.agent.flying, self.world.agent.is_sitting(), vr_now, dt);
         if vr.toggle_fly {
             self.toggle_fly();
         }

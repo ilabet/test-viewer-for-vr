@@ -16,6 +16,9 @@ const RUN_AT: f32 = 0.9;
 const SNAP_AT: f32 = 0.7;
 const SNAP_RELEASE: f32 = 0.3;
 const DOUBLE_TAP: Duration = Duration::from_millis(350);
+/// The scripted controller's time per drawn frame, so that no tap falls
+/// between two frames however slow the GPU (a slower GPU plays it slower).
+const SIM_STEP: f32 = 1.0 / 30.0;
 /// From the agent's position (its centre) down to its feet, where the VR
 /// stage's floor goes.
 #[cfg_attr(not(feature = "openxr"), allow(dead_code))]
@@ -89,6 +92,8 @@ pub struct VrControls {
     pub stage: Mat4,
     /// AURORA_VR_SIM=1: the scripted controller's start.
     pub sim: Option<Instant>,
+    /// Its script time, in seconds.
+    sim_t: f32,
     #[cfg(feature = "openxr")]
     frame: Option<aurora_render::aurora_xr::XrFrame>,
 }
@@ -108,6 +113,7 @@ impl Default for VrControls {
             aim: [None; 2],
             stage: Mat4::IDENTITY,
             sim: sim_wanted().then(Instant::now),
+            sim_t: 0.0,
             #[cfg(feature = "openxr")]
             frame: None,
         }
@@ -115,6 +121,14 @@ impl Default for VrControls {
 }
 
 impl VrControls {
+    /// The clock of the controllers: `real`, or the scripted controller's.
+    pub fn clock(&self, real: Instant) -> Instant {
+        match self.sim {
+            Some(start) => start + Duration::from_secs_f32(self.sim_t),
+            None => real,
+        }
+    }
+
     /// Adds this frame's controllers to the movement keys `i`.
     pub fn apply(&mut self, i: &mut MoveInput, flying: bool, seated: bool, now: Instant, dt: f32) -> VrActions {
         let pad = self.pad;
@@ -253,8 +267,9 @@ impl VrControls {
             // a paused headset leaves no stick held
             None => self.pad = VrPad::default(),
         }
-        if let Some(start) = self.sim {
-            self.pad = sim_pad(start.elapsed().as_secs_f32());
+        if self.sim.is_some() {
+            self.sim_t += SIM_STEP;
+            self.pad = sim_pad(self.sim_t);
         }
     }
 
