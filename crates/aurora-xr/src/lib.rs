@@ -7,12 +7,16 @@
 #[cfg(not(target_os = "macos"))]
 mod runtime;
 #[cfg(not(target_os = "macos"))]
+mod session;
+#[cfg(not(target_os = "macos"))]
 mod vulkan;
 
 #[cfg(not(target_os = "macos"))]
 pub use runtime::{XrRuntime, XrSystemInfo};
 #[cfg(not(target_os = "macos"))]
 pub use vulkan::XrGpu;
+#[cfg(not(target_os = "macos"))]
+pub use session::{EyeView, XrFrame, XrInput, XrSession};
 
 /// Why VR could not start.
 #[derive(Debug, thiserror::Error)]
