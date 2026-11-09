@@ -16,8 +16,9 @@ const RUN_AT: f32 = 0.9;
 const SNAP_AT: f32 = 0.7;
 const SNAP_RELEASE: f32 = 0.3;
 const DOUBLE_TAP: Duration = Duration::from_millis(350);
-/// The scripted controller's time per drawn frame, so that no tap falls
-/// between two frames however slow the GPU (a slower GPU plays it slower).
+/// The scripted controller's most time per drawn frame, so that no tap
+/// falls between two frames however slow the GPU (below 30 fps it plays
+/// slower; above, in real time).
 const SIM_STEP: f32 = 1.0 / 30.0;
 /// From the agent's position (its centre) down to its feet, where the VR
 /// stage's floor goes.
@@ -94,6 +95,8 @@ pub struct VrControls {
     pub sim: Option<Instant>,
     /// Its script time, in seconds.
     sim_t: f32,
+    /// When the script last advanced.
+    sim_last: Option<Instant>,
     #[cfg(feature = "openxr")]
     frame: Option<aurora_render::aurora_xr::XrFrame>,
 }
@@ -114,6 +117,7 @@ impl Default for VrControls {
             stage: Mat4::IDENTITY,
             sim: sim_wanted().then(Instant::now),
             sim_t: 0.0,
+            sim_last: None,
             #[cfg(feature = "openxr")]
             frame: None,
         }
@@ -267,8 +271,11 @@ impl VrControls {
             // a paused headset leaves no stick held
             None => self.pad = VrPad::default(),
         }
-        if self.sim.is_some() {
-            self.sim_t += SIM_STEP;
+        if let Some(start) = self.sim {
+            let now = Instant::now();
+            let dt = now.duration_since(self.sim_last.unwrap_or(start)).as_secs_f32();
+            self.sim_last = Some(now);
+            self.sim_t += dt.min(SIM_STEP);
             self.pad = sim_pad(self.sim_t);
         }
     }
