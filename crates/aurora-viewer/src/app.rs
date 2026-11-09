@@ -8817,10 +8817,9 @@ impl App {
             let overlays = self.settings.world_overlays;
             self.scene
                 .update_land_overlays(&mut gfx.renderer, &self.world, overlays, &self.palette);
+            // a VR headset sees from the avatar's eyes too
             self.scene.set_first_person(
-                self.camera
-                    .first_person_view()
-                    .then_some(self.settings.camera.show_avatar_in_mouselook),
+                (self.camera.first_person_view() || self.vr.head().is_some()).then_some(self.settings.camera.show_avatar_in_mouselook),
             );
             self.scene.update_portal_clipping(&mut gfx.renderer, &self.world);
             self.scene.build_lists(&mut gfx.renderer, &cull, self.settings.shadows);
