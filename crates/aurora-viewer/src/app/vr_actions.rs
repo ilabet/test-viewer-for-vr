@@ -76,7 +76,9 @@ impl App {
         }
         let mut picked = None;
         let mut open = true;
-        let palette = self.palette.clone();
+        let palette = self.palette;
+        // kept above the desktop windows: their shapes inside the menu's rect would otherwise cover it in the headset
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("vr-menu")));
         Floater::new(
             "vr-menu",
             aurora_i18n::tr!("vr-menu-title"),
