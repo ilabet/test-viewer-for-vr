@@ -121,6 +121,7 @@ mod texture_library;
 mod texture_refresh;
 mod viewer_stats;
 mod viewfinder;
+mod vr_actions;
 mod wearable_editor;
 mod world_click_demo;
 mod worn_demo;
@@ -259,6 +260,8 @@ pub struct App {
     camera: Camera,
     input: MoveInput,
     joystick: joystick::State,
+    /// VR controllers (AURORA_VR=1).
+    vr: crate::vr::VrControls,
     /// Keys and bindable mouse buttons held down.
     down: HashSet<Input>,
     shift: bool,
@@ -1114,6 +1117,7 @@ impl App {
             camera: Camera::default(),
             input: MoveInput::default(),
             joystick: Default::default(),
+            vr: Default::default(),
             down: HashSet::new(),
             shift: false,
             ctrl: false,
@@ -6702,6 +6706,26 @@ impl App {
             i.up || joystick_up,
         );
         self.joystick_avatar(&mut i);
+        let vr_now = self.vr.clock(Instant::now());
+        let vr = self
+            .vr
+            .apply(&mut i, self.world.agent.flying, self.world.agent.is_sitting(), vr_now, dt);
+        if vr.toggle_fly {
+            self.toggle_fly();
+        }
+        if vr.stand {
+            self.sit_stand_shortcut();
+        }
+        self.world.agent.yaw += vr.turn;
+        if let Some(item) = vr.pick {
+            self.vr_menu_pick(item);
+        }
+        if let Some(hand) = vr.point {
+            self.vr_point(hand, false);
+        }
+        if let Some(hand) = vr.grab {
+            self.vr_point(hand, true);
+        }
         if self.camera.free().is_some() {
             // the photo's free camera takes the movement keys: the avatar
             // stays where it is (no walk, turn, jump or flight start).
@@ -6730,7 +6754,7 @@ impl App {
             // + right button = walk forward (LLToolCamera::handleRightMouseDown)
             i.forward |= self.right_drag;
         }
-        i.run = self.temp_run.is_some() || self.joystick.running;
+        i.run = self.temp_run.is_some() || self.joystick.running || self.vr.running;
         if self.world.rlva.has("temprun") {
             i.run = false;
         }
@@ -8344,6 +8368,16 @@ impl App {
         {
             gfx.renderer.apply_settings(self.settings.render_settings());
         }
+        // AURORA_VR=1: wait for the headset's frame; the window shows its head
+        #[cfg(feature = "openxr")]
+        if gfx.renderer.xr_active() {
+            let feet = self.world.agent.position - glam::Vec3::Z * crate::vr::AGENT_TO_FEET;
+            self.vr.begin(&mut gfx.renderer, feet, self.world.agent.yaw);
+        }
+        if let Some((pos, fwd)) = self.vr.head() {
+            self.camera.position = pos;
+            self.camera.target = pos + fwd;
+        }
         let mut view = self.camera.view();
         let mut proj = frame_proj(&self.camera);
         let mut vp = proj * view;
@@ -8637,6 +8671,10 @@ impl App {
                 self.net.send(NetCommand::SetFov(self.sent_fov));
             }
             if camera_changed {
+                if let Some((pos, fwd)) = self.vr.head() {
+                    self.camera.position = pos;
+                    self.camera.target = pos + fwd;
+                }
                 view = self.camera.view();
                 proj = frame_proj(&self.camera);
                 vp = proj * view;
@@ -8779,10 +8817,9 @@ impl App {
             let overlays = self.settings.world_overlays;
             self.scene
                 .update_land_overlays(&mut gfx.renderer, &self.world, overlays, &self.palette);
+            // a VR headset sees from the avatar's eyes too
             self.scene.set_first_person(
-                self.camera
-                    .first_person_view()
-                    .then_some(self.settings.camera.show_avatar_in_mouselook),
+                (self.camera.first_person_view() || self.vr.head().is_some()).then_some(self.settings.camera.show_avatar_in_mouselook),
             );
             self.scene.update_portal_clipping(&mut gfx.renderer, &self.world);
             self.scene.build_lists(&mut gfx.renderer, &cull, self.settings.shadows);
@@ -9776,6 +9813,19 @@ impl App {
             .handle_platform_output_with_event_loop(&gfx.window, event_loop, full.platform_output);
         self.perf.ui_ms = t_ui.elapsed().as_secs_f32() * 1000.0;
         self.frame_profile.lap(Lap::Hover);
+        // over the headset's eyes: the VR menu (and the simulation's
+        // readout) and the controllers' beams, not the desktop's windows
+        #[cfg(feature = "openxr")]
+        let eye_ui: [Option<aurora_render::EguiFrame>; 2] = if self.vr.has_frame() {
+            let mut eyes: [Option<aurora_render::EguiFrame>; 2] = Default::default();
+            for (eye, slot) in eyes.iter_mut().enumerate() {
+                let shapes = self.vr_eye_shapes(&full.shapes, ctx.content_rect(), eye);
+                *slot = Some(self.egui_hand_over.frame(&ctx, shapes, Default::default(), full.pixels_per_point));
+            }
+            eyes
+        } else {
+            Default::default()
+        };
         let egui_frame = self.egui_hand_over.frame(
             &ctx,
             std::mem::take(&mut full.shapes),
@@ -9882,7 +9932,14 @@ impl App {
         // returned are those of the frame before; a frame that carries a
         // capture is waited for, its pixels are read in the tail below.
         let lists = if self.in_world() { &self.scene.lists } else { &self.empty_lists };
+        #[cfg(feature = "openxr")]
+        let eye_fp = self.vr.has_frame().then(|| fp.clone());
         let stats = gfx.renderer.render(fp, lists, Some(egui_frame));
+        // AURORA_VR=1: then the headset's eyes, from the avatar's place
+        #[cfg(feature = "openxr")]
+        if let Some(fp) = eye_fp {
+            self.vr.draw_eyes(&mut gfx.renderer, &fp, lists, eye_ui);
+        }
         self.photo_drawn(&mut gfx.renderer);
         self.last_render = stats;
         if stats.presented && !gfx.shown {
@@ -13124,6 +13181,7 @@ impl App {
         let mut a = UiActions::default();
         let p = self.palette;
         let ctx = ui.ctx().clone();
+        self.vr_menu_ui(&ctx);
         ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
@@ -15729,7 +15787,15 @@ impl ApplicationHandler for App {
         let created = if std::env::var_os("AURORA_GPU_START_FAIL").is_some() {
             Err(aurora_render::RenderError::NoAdapter("AURORA_GPU_START_FAIL".into()))
         } else {
-            Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu)
+            Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu).or_else(|e| {
+                if !aurora_render::vr_headset_asked() {
+                    return Err(e);
+                }
+                // the headset's GPU failed: the desktop on any other one
+                log::warn!("VR: the headset's GPU could not start ({e}); staying on the desktop");
+                aurora_render::vr_turn_off();
+                Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu)
+            })
         };
         let renderer = match created {
             Ok(r) => r,

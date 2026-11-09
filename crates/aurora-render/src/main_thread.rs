@@ -233,6 +233,10 @@ pub struct Renderer {
     lost: DeviceLost,
     /// AURORA_DEMO_GPU_LOST: the frame the device is taken as lost at.
     demo_lost: Option<u64>,
+    /// The eye the next frame is drawn for (`render_xr_eye`).
+    xr_eye: Option<crate::packet::XrEyeTarget>,
+    /// The VR session (AURORA_VR=1 with a headset found).
+    xr: Option<crate::xr::XrState>,
 }
 
 impl Renderer {
@@ -266,6 +270,12 @@ impl Renderer {
             log::warn!("GPU: no Vulkan adapter without Dozen (Vulkan on Direct3D 12): trying again with it");
             instance = wgpu::Instance::new(desc());
             adapters = pollster::block_on(instance.enumerate_adapters(crate::BACKENDS));
+        }
+        // AURORA_VR=1: the GPU is the one the headset's runtime names
+        let mut xr_pending = crate::xr::Pending::open();
+        if let Some((xr_instance, xr_adapter)) = xr_pending.adapter_override() {
+            instance = xr_instance;
+            adapters = vec![xr_adapter];
         }
         let surface = instance.create_surface(target).map_err(|e| RenderError::Surface(e.to_string()))?;
         let candidates: Vec<crate::adapter_choice::Candidate> = adapters
@@ -308,7 +318,7 @@ impl Renderer {
         let mut opened = None;
         let mut failure = RenderError::NoAdapter("no native GPU adapter can present to the window".into());
         for (n, &i) in plan.order.iter().enumerate() {
-            match open_device(&adapters[i]) {
+            match xr_pending.open_device(&adapters[i]) {
                 Ok(o) => {
                     let why = match (n, plan.reason) {
                         (0, crate::adapter_choice::Reason::Wanted) => "the one asked for (AURORA_GPU or Preferences › Graphics)",
@@ -435,9 +445,18 @@ impl Renderer {
             anim_clock,
             lost: lost.clone(),
         })?;
+        let xr = if xr_pending.active() {
+            xr_pending.start((width, height), backend.surface_format(), &device)
+        } else {
+            None
+        };
         let msaa_supported = backend.msaa_supported().to_vec();
         let can_capture = backend.can_capture();
-        let host = Host::new(backend, thread_wanted(std::env::var("AURORA_RENDER_THREAD").ok().as_deref()));
+        // a VR frame is handed to the headset once its eyes are submitted: drawn here
+        let host = Host::new(
+            backend,
+            xr.is_none() && thread_wanted(std::env::var("AURORA_RENDER_THREAD").ok().as_deref()),
+        );
         log::info!(
             "renderer: {}",
             if host.threaded() {
@@ -498,6 +517,8 @@ impl Renderer {
             histogram_request: None,
             histogram: None,
             lost,
+            xr_eye: None,
+            xr,
             demo_lost: crate::device_lost::demo_frame(
                 std::env::var_os("AURORA_DEMO").is_some(),
                 std::env::var("AURORA_DEMO_GPU_LOST").ok().as_deref(),
@@ -768,7 +789,11 @@ impl Renderer {
 
     /// Apply quality settings: pipelines and targets are rebuilt by the
     /// backend with the next frame, only when needed.
-    pub fn apply_settings(&mut self, s: RenderSettings) {
+    pub fn apply_settings(&mut self, mut s: RenderSettings) {
+        // one temporal history can't serve two eyes and the window: SMAA in VR
+        if self.xr.is_some() && s.aa == AntiAliasing::Taa {
+            s.aa = AntiAliasing::Smaa;
+        }
         if s.anisotropy != self.settings.anisotropy {
             self.textures.set_anisotropy(&self.device, s.anisotropy);
         }
@@ -1044,6 +1069,7 @@ impl Renderer {
             capture,
             histogram: self.histogram_request.take(),
             input_at: self.input_at.take(),
+            xr_eye: self.xr_eye.take(),
         };
         self.frames += 1;
         let built = t0.elapsed();
@@ -1364,7 +1390,7 @@ impl Renderer {
 }
 
 /// What `Renderer::new` needs of an opened adapter.
-struct OpenedDevice {
+pub(crate) struct OpenedDevice {
     device: wgpu::Device,
     queue: wgpu::Queue,
     alim: wgpu::Limits,
@@ -1376,7 +1402,67 @@ struct OpenedDevice {
 
 /// Open `adapter` with the features the renderer needs and the optional
 /// ones it has; an error when it lacks a needed one or the device fails.
-fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
+pub(crate) fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
+    open_device_with(adapter, |adapter, desc| {
+        pollster::block_on(adapter.request_device(desc)).map_err(|e| RenderError::Device(e.to_string()))
+    })
+}
+
+impl Renderer {
+    /// A VR session runs (AURORA_VR=1 with a headset found).
+    pub fn xr_active(&self) -> bool {
+        self.xr.is_some()
+    }
+}
+
+#[cfg(all(feature = "openxr", not(target_os = "macos")))]
+impl Renderer {
+    /// Waits for the headset's next frame. `Some`: draw both eyes with
+    /// [`Renderer::render_xr_eye`], then [`Renderer::xr_end_frame`].
+    pub fn xr_begin_frame(&mut self) -> Option<aurora_xr::XrFrame> {
+        self.xr.as_mut()?.begin()
+    }
+
+    /// Draws one eye (`layer` 0 left, 1 right) into the headset's image.
+    /// The window's requests (hover, clicks, photos) wait for its own frame.
+    /// `ui`: the interface drawn over the eye (its textures already sent
+    /// with the window's frame).
+    pub fn render_xr_eye(&mut self, params: FrameParams, lists: &DrawLists, layer: u32, ui: Option<crate::EguiFrame>) -> RenderStats {
+        let inv_vp = self.last_inv_vp;
+        self.xr_eye = self.xr.as_ref().and_then(|x| x.eye_target(layer));
+        let hover = self.hover_request.take();
+        let picks = std::mem::take(&mut self.pick_requests);
+        let drawn = std::mem::take(&mut self.drawn_requests);
+        let snapshot = self.snapshot_request.take();
+        let capture = std::mem::take(&mut self.capture_request);
+        let histogram = self.histogram_request.take();
+        let stats = self.render(params, lists, ui);
+        // the window's cursor rays stay those of the window's view
+        self.last_inv_vp = inv_vp;
+        self.xr_eye = None;
+        self.hover_request = hover;
+        self.pick_requests = picks;
+        self.drawn_requests = drawn;
+        self.snapshot_request = snapshot;
+        self.capture_request = capture;
+        self.histogram_request = histogram;
+        stats
+    }
+
+    /// Hands the eyes drawn since [`Renderer::xr_begin_frame`] to the headset.
+    pub fn xr_end_frame(&mut self) {
+        if let Some(x) = self.xr.as_mut() {
+            x.end();
+        }
+    }
+}
+
+/// [`open_device`] with the final device creation left to `create` (the
+/// OpenXR path creates the Vulkan device through the VR runtime).
+pub(crate) fn open_device_with(
+    adapter: &wgpu::Adapter,
+    create: impl FnOnce(&wgpu::Adapter, &wgpu::DeviceDescriptor) -> Result<(wgpu::Device, wgpu::Queue), RenderError>,
+) -> Result<OpenedDevice, RenderError> {
     let afeat = adapter.features();
     let alim = adapter.limits();
     let bindless_feats =
@@ -1435,15 +1521,17 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
         features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
     }
     let max_textures = texture_page_limit(&alim);
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("aurora"),
-        required_features: features,
-        required_limits: alim.clone(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        trace: wgpu::Trace::Off,
-    }))
-    .map_err(|e| RenderError::Device(e.to_string()))?;
+    let (device, queue) = create(
+        adapter,
+        &wgpu::DeviceDescriptor {
+            label: Some("aurora"),
+            required_features: features,
+            required_limits: alim.clone(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        },
+    )?;
     Ok(OpenedDevice {
         device,
         queue,

@@ -66,7 +66,9 @@ pub mod water_effects;
 mod water_optics;
 mod water_wake;
 pub mod writes;
+mod xr;
 pub use water_effects::{WaterEffects, WaterEvent, WaterGround};
+pub use xr::{headset_asked as vr_headset_asked, turn_off as vr_turn_off};
 
 pub use arena::MeshAlloc;
 // What a tile of a photo draws around what it keeps, for the bloom and the
@@ -82,6 +84,10 @@ pub use main_thread::{GpuInfo, Renderer};
 pub use renderer::{CASCADES, RenderError};
 pub use textures::{MASK_CUTOFF, MipLevel, alpha_coverage, build_mips, build_mips_alpha_weighted, preserve_alpha_coverage};
 pub use types::*;
+
+// VR headsets (the `openxr` feature)
+#[cfg(all(feature = "openxr", not(target_os = "macos")))]
+pub use aurora_xr;
 pub use ui_blur::blurred_backdrop;
 pub use ui_frame::{EguiFrame, EguiHandOver};
 pub use ui_glass::{glass_panel, glass_panel_faded, glass_region};

@@ -12723,3 +12723,15 @@ import-source-folder-name-help = { $source } のインベントリ内のフォ�
 
 import-local-stage-upload = アップロードに追加（{ $count }）
 import-local-stage-upload-help = 非表示を含むチェック済みファイルのアップロードを準備し、ローカルプレビューは保持します。料金は別途確認します。
+
+vr-menu-title = VRメニュー
+vr-menu-hint = 右スティック：選択 · トリガー：決定 · B/Y：閉じる
+vr-menu-fly = 飛ぶ
+vr-menu-land = 着地
+vr-menu-sit = 座る
+vr-menu-stand = 立つ
+vr-menu-always-run = 常に走る
+vr-menu-snap-turn = 回転：スナップ
+vr-menu-smooth-turn = 回転：スムーズ
+vr-menu-close = 閉じる
+vr-sim-title = シミュレートされたヘッドセット（AURORA_VR_SIM）

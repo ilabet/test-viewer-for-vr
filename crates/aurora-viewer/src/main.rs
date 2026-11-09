@@ -93,6 +93,7 @@ mod ui_sound;
 mod updater;
 mod url_scheme;
 mod voice;
+mod vr;
 mod wearable_editor;
 mod window_hold;
 mod window_show;
