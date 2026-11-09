@@ -3,8 +3,26 @@
 //! offscreen and copied into the headset's image. Without a runtime or a
 //! headset the viewer stays on the desktop.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::RenderError;
 use crate::main_thread::{OpenedDevice, open_device};
+
+static OFF: AtomicBool = AtomicBool::new(false);
+
+/// No headset for the rest of this run (its GPU could not start): the next
+/// renderer is a desktop one.
+pub fn turn_off() {
+    OFF.store(true, Ordering::Relaxed);
+}
+
+/// AURORA_VR=1 asks for a real headset (not the simulated one), and it is
+/// not turned off.
+pub fn headset_asked() -> bool {
+    !OFF.load(Ordering::Relaxed)
+        && wanted(std::env::var("AURORA_VR").ok().as_deref())
+        && !wanted(std::env::var("AURORA_VR_SIM").ok().as_deref())
+}
 
 /// AURORA_VR=1 asks for the headset; anything else, or nothing, leaves the
 /// viewer on the desktop.
@@ -37,7 +55,7 @@ mod imp {
                     sim: true,
                 };
             }
-            let opened = if wanted(std::env::var("AURORA_VR").ok().as_deref()) {
+            let opened = if headset_asked() {
                 match XrRuntime::open("Aurora").and_then(|rt| rt.create_adapter().map(|a| (rt, a))) {
                     Ok(o) => Some(o),
                     Err(e) => {

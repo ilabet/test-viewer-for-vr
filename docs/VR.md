@@ -6,7 +6,8 @@ Virtual Desktop, or any other OpenXR runtime with Vulkan support
 (`XR_KHR_vulkan_enable2`). Standalone Quest is not supported: the headset's
 mobile GPU cannot run a desktop viewer.
 
-Status: experimental, not yet tested on a headset.
+Status: experimental, not yet tested on a headset (only on the simulated
+one below).
 
 ## Building and starting
 
@@ -23,6 +24,36 @@ variable, Aurora starts on the desktop as usual; the log says why
 (`VR: no OpenXR runtime found`, `VR: no headset connected`…).
 
 macOS has no OpenXR runtime with Vulkan: the feature does nothing there.
+
+## Testing on a headset
+
+1. Install Rust (rustup) and, on Windows, the Visual Studio C++ build tools.
+2. Get the branch: `git clone https://github.com/ilabet/test-viewer-for-vr`,
+   then `git checkout feat/openxr-vr`.
+3. Start the runtime and make it the active OpenXR runtime:
+   - Quest 2/3/Pro: the Meta Quest Link app on the PC (Settings › General ›
+     OpenXR Runtime: set Meta Quest Link as active), then Quest Link (cable)
+     or Air Link from the headset. Virtual Desktop or Steam Link work too,
+     through their own runtime or SteamVR.
+   - Vive, Index, WMR, Pico: SteamVR (Settings › OpenXR: set SteamVR as the
+     OpenXR runtime).
+4. Start Aurora on the demo world first (no account, nothing sent to the
+   grid). PowerShell:
+
+   ```powershell
+   $env:AURORA_VR = "1"; $env:AURORA_DEMO = "1"
+   cargo run -p aurora-viewer --features openxr
+   ```
+
+   bash: `AURORA_VR=1 AURORA_DEMO=1 cargo run -p aurora-viewer --features openxr`
+5. Put the headset on: you stand at the avatar's feet in the demo plaza.
+   Try the controls below, the B/Y menu, the beams, touching (trigger) and
+   sitting (grip) on the plaza's objects.
+6. Then without `AURORA_DEMO`, log into Second Life from the desktop
+   window as usual; the headset follows once you're in-world.
+
+If nothing appears in the headset, the log (`RUST_LOG=info`) says why:
+`VR: no OpenXR runtime found`, `VR: no headset connected`, or the GPU error.
 
 ## Controls (VRChat-style)
 
@@ -70,13 +101,15 @@ AURORA_DEMO=1 AURORA_VR_SIM=1 cargo run -p aurora-viewer --features openxr
 ## Known limits
 
 - Each frame is drawn three times (two eyes and the window), at the window's
-  size; the runtime scales the eye images to the display.
+  size; the runtime scales the eye images to the display. The eye images
+  keep the window's size at startup: resizing the window afterwards crops
+  them, so size the window before putting the headset on.
 - Draw lists are culled for the window's camera, so objects outside its view
   can be missing in the headset. Mouselook (M) keeps them close.
-- Only the VR menu is drawn into the headset, flat in front of the eyes;
-  the rest of the interface (chat, inventory) is on the desktop window.
-- There is no laser beam drawn yet for the controllers' aim.
-- Temporal anti-aliasing shares its history between the eyes and the
-  window; prefer FXAA or SMAA in VR.
-- The eye images keep the window's size at startup: resizing the window
-  afterwards crops them.
+- Only the VR menu and the controllers' beams are drawn into the headset,
+  flat in front of the eyes; the rest of the interface (chat, inventory)
+  stays on the desktop window.
+- Temporal anti-aliasing is replaced by SMAA while the headset runs (one
+  history can't serve two eyes).
+- If the headset's GPU can't start, Aurora logs why and starts on the
+  desktop instead.

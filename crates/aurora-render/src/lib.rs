@@ -68,6 +68,7 @@ mod water_wake;
 pub mod writes;
 mod xr;
 pub use water_effects::{WaterEffects, WaterEvent, WaterGround};
+pub use xr::{headset_asked as vr_headset_asked, turn_off as vr_turn_off};
 
 pub use arena::MeshAlloc;
 // What a tile of a photo draws around what it keeps, for the bloom and the

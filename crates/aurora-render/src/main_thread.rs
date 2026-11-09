@@ -789,7 +789,11 @@ impl Renderer {
 
     /// Apply quality settings: pipelines and targets are rebuilt by the
     /// backend with the next frame, only when needed.
-    pub fn apply_settings(&mut self, s: RenderSettings) {
+    pub fn apply_settings(&mut self, mut s: RenderSettings) {
+        // one temporal history can't serve two eyes and the window: SMAA in VR
+        if self.xr.is_some() && s.aa == AntiAliasing::Taa {
+            s.aa = AntiAliasing::Smaa;
+        }
         if s.anisotropy != self.settings.anisotropy {
             self.textures.set_anisotropy(&self.device, s.anisotropy);
         }

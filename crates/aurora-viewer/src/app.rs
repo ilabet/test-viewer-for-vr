@@ -9813,15 +9813,16 @@ impl App {
             .handle_platform_output_with_event_loop(&gfx.window, event_loop, full.platform_output);
         self.perf.ui_ms = t_ui.elapsed().as_secs_f32() * 1000.0;
         self.frame_profile.lap(Lap::Hover);
-        // the menu over the headset's eyes too (and the simulation's readout)
+        // over the headset's eyes: the VR menu (and the simulation's
+        // readout) and the controllers' beams, not the desktop's windows
         #[cfg(feature = "openxr")]
-        let eye_ui: [Option<aurora_render::EguiFrame>; 2] = if self.vr.has_frame() && (self.vr.menu_open || self.vr.sim.is_some()) {
-            std::array::from_fn(|_| {
-                Some(
-                    self.egui_hand_over
-                        .frame(&ctx, full.shapes.clone(), Default::default(), full.pixels_per_point),
-                )
-            })
+        let eye_ui: [Option<aurora_render::EguiFrame>; 2] = if self.vr.has_frame() {
+            let mut eyes: [Option<aurora_render::EguiFrame>; 2] = Default::default();
+            for (eye, slot) in eyes.iter_mut().enumerate() {
+                let shapes = self.vr_eye_shapes(&full.shapes, ctx.content_rect(), eye);
+                *slot = Some(self.egui_hand_over.frame(&ctx, shapes, Default::default(), full.pixels_per_point));
+            }
+            eyes
         } else {
             Default::default()
         };
@@ -15786,7 +15787,15 @@ impl ApplicationHandler for App {
         let created = if std::env::var_os("AURORA_GPU_START_FAIL").is_some() {
             Err(aurora_render::RenderError::NoAdapter("AURORA_GPU_START_FAIL".into()))
         } else {
-            Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu)
+            Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu).or_else(|e| {
+                if !aurora_render::vr_headset_asked() {
+                    return Err(e);
+                }
+                // the headset's GPU failed: the desktop on any other one
+                log::warn!("VR: the headset's GPU could not start ({e}); staying on the desktop");
+                aurora_render::vr_turn_off();
+                Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu)
+            })
         };
         let renderer = match created {
             Ok(r) => r,

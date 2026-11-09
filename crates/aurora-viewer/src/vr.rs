@@ -26,6 +26,24 @@ const SIM_STEP: f32 = 1.0 / 30.0;
 pub const AGENT_TO_FEET: f32 = 0.9;
 /// Smooth turn at full deflection, radians per second.
 const SMOOTH_RATE: f32 = 2.5;
+/// The controllers' beams, metres.
+#[cfg_attr(not(feature = "openxr"), allow(dead_code))]
+pub const BEAM_LENGTH: f32 = 4.0;
+
+/// A controller's beam (`aim`: origin, direction) of `len` metres, in the
+/// points of an eye image of `size` seen through `vp`; `None` when an end
+/// is behind the eye.
+#[cfg_attr(not(feature = "openxr"), allow(dead_code))]
+pub fn beam_on_screen(vp: Mat4, (origin, dir): (Vec3, Vec3), len: f32, size: Vec2) -> Option<[Vec2; 2]> {
+    let on_screen = |p: Vec3| {
+        let c = vp * p.extend(1.0);
+        (c.w > 1e-4).then(|| {
+            let n = Vec2::new(c.x, c.y) / c.w;
+            Vec2::new((n.x * 0.5 + 0.5) * size.x, (0.5 - n.y * 0.5) * size.y)
+        })
+    };
+    Some([on_screen(origin)?, on_screen(origin + dir * len)?])
+}
 
 /// The controllers of one headset frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -94,6 +112,9 @@ pub struct VrControls {
     pub aim: [Option<(Vec3, Vec3)>; 2],
     /// The stage in the world, for this frame.
     pub stage: Mat4,
+    /// The VR panels' bodies this frame (window points): what of the
+    /// interface the eyes show.
+    pub panels: Vec<egui::Rect>,
     /// AURORA_VR_SIM=1: the scripted controller's start.
     pub sim: Option<Instant>,
     /// Its script time, in seconds.
@@ -119,6 +140,7 @@ impl Default for VrControls {
             menu_latched: false,
             aim: [None; 2],
             stage: Mat4::IDENTITY,
+            panels: Vec::new(),
             sim: sim_wanted().then(Instant::now),
             sim_t: 0.0,
             sim_last: None,
@@ -286,6 +308,13 @@ impl VrControls {
         }
     }
 
+    /// An eye's view-projection in the world (the near plane leaves its
+    /// x, y and w alone, what drawing over the eye needs).
+    pub fn eye_view_proj(&self, eye: usize) -> Option<Mat4> {
+        let e = self.frame.as_ref()?.eyes.get(eye)?;
+        Some(e.projection(0.1) * e.view_in(self.stage))
+    }
+
     /// Draws both eyes of the frame begun, then hands it to the headset.
     pub fn draw_eyes(
         &mut self,
@@ -345,6 +374,24 @@ mod tests {
         let mut i = MoveInput::default();
         let a = c.apply(&mut i, flying, seated, at, 1.0 / 90.0);
         (i, a)
+    }
+
+    #[test]
+    fn beam_projects_ahead_and_drops_behind() {
+        // looking down -Z: a beam straight ahead from below the eye
+        // 90° field of view: x and y over the distance ahead (w = -z)
+        let vp = Mat4::from_cols(
+            glam::Vec4::X,
+            glam::Vec4::Y,
+            glam::Vec4::new(0.0, 0.0, 0.0, -1.0),
+            glam::Vec4::new(0.0, 0.0, 0.1, 0.0),
+        );
+        let size = Vec2::new(200.0, 100.0);
+        let [a, b] = beam_on_screen(vp, (Vec3::new(0.0, -0.3, -0.3), Vec3::NEG_Z), 4.0, size).unwrap();
+        assert!((a.x - 100.0).abs() < 1e-3 && (b.x - 100.0).abs() < 1e-3);
+        // below the centre, nearing it with distance
+        assert!(a.y > b.y && b.y > 50.0);
+        assert!(beam_on_screen(vp, (Vec3::new(0.0, 0.0, 1.0), Vec3::Z), 4.0, size).is_none());
     }
 
     #[test]
