@@ -79,6 +79,9 @@ pub struct VrControls {
     pub pad: VrPad,
     last: VrPad,
     last_jump: Option<Instant>,
+    /// The A press that toggled flying, not a jump while it is held (in
+    /// the air, a held jump starts flying again).
+    jump_eaten: bool,
     turn_latched: bool,
     /// Snap turn step in degrees; 0 turns smoothly.
     pub snap_degrees: f32,
@@ -107,6 +110,7 @@ impl Default for VrControls {
             pad: VrPad::default(),
             last: VrPad::default(),
             last_jump: None,
+            jump_eaten: false,
             turn_latched: false,
             snap_degrees: 30.0,
             running: false,
@@ -151,11 +155,13 @@ impl VrControls {
                 Some(at) if now.duration_since(at) <= DOUBLE_TAP => {
                     out.toggle_fly = true;
                     self.last_jump = None;
+                    self.jump_eaten = true;
                 }
                 _ => self.last_jump = Some(now),
             }
         }
-        i.up |= pad.jump && !out.toggle_fly;
+        self.jump_eaten &= pad.jump;
+        i.up |= pad.jump && !self.jump_eaten;
         if flying {
             i.down |= pad.descend;
         }
@@ -436,8 +442,11 @@ mod tests {
         let (i, a) = step(&mut c, a_down, false, false, t);
         assert!(i.up && !a.toggle_fly);
         step(&mut c, VrPad::default(), false, false, t + Duration::from_millis(100));
-        let (_, a) = step(&mut c, a_down, false, false, t + Duration::from_millis(200));
-        assert!(a.toggle_fly);
+        let (i, a) = step(&mut c, a_down, false, false, t + Duration::from_millis(200));
+        assert!(a.toggle_fly && !i.up);
+        // held on, the toggling press still doesn't jump (or fly again)
+        let (i, _) = step(&mut c, a_down, true, false, t + Duration::from_millis(250));
+        assert!(!i.up);
         // a slow second tap is just another jump
         step(&mut c, VrPad::default(), false, false, t + Duration::from_millis(300));
         step(&mut c, a_down, false, false, t + Duration::from_millis(400));
